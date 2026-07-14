@@ -1,0 +1,74 @@
+[project]
+name = "OpenQuantMaster"
+version = "0.1.0"
+description = "Agent-first quantitative trading daemon"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+readme = "README.md"
+authors = [
+    {name = "linjiaqin12138", email = "JiaqinLin@outlook.com"},
+]
+keywords = ["quantitative", "trading", "agent", "asyncio", "pipeline"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "apscheduler>=4.0.0a5",
+    "aiosqlite>=0.20.0",
+    "click>=8.1.0",
+    "jsonschema>=4.22.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.3.0",
+    "pyyaml>=6.0.1",
+    "sqlalchemy>=2.0.30",
+    "structlog>=24.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/linjiaqin12138/OpenQuantMaster.git"
+Repository = "https://github.com/linjiaqin12138/OpenQuantMaster.git"
+Issues = "https://github.com/linjiaqin12138/OpenQuantMaster.git/issues"
+
+[project.scripts]
+quantmaster-daemon = "runtime.daemon:main"
+quantmaster-run = "runtime.cli:run_pipeline"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["runtime*", "tools*", "skills*", "schemas*", "pipelines*"]
+
+[tool.setuptools.package-data]
+"skills" = ["**/*.md"]
+"schemas" = ["**/*.json"]
+"pipelines" = ["**/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+markers = [
+    "unit: Unit tests (fast, no network)",
+    "integration: Integration tests (temp SQLite, no external APIs)",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+src = ["runtime", "tools", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]
