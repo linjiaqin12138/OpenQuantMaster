@@ -1,0 +1,16 @@
+name: hello_pipeline
+version: "1.0"
+description: Smoke-test pipeline using the echo_tool.
+stages:
+  - name: greet
+    tool: echo_tool
+    inputs:
+      message: "Hello from OpenQuantMaster"
+      repeat: 1
+    on_failure: stop
+  - name: repeat_greet
+    tool: echo_tool
+    inputs:
+      message: "stage two"
+      repeat: 2
+    on_failure: stop

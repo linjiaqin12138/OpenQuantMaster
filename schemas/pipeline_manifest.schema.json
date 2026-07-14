@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openquantmaster.local/schemas/pipeline_manifest.schema.json",
+  "title": "PipelineManifest",
+  "type": "object",
+  "required": ["name", "version", "stages"],
+  "properties": {
+    "name": {"type": "string", "minLength": 1},
+    "version": {"type": "string"},
+    "description": {"type": "string"},
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "tool"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "tool": {"type": "string", "minLength": 1},
+          "skill": {"type": "string"},
+          "inputs": {"type": "object"},
+          "on_failure": {
+            "type": "string",
+            "enum": ["stop", "skip", "retry", "escalate"],
+            "default": "stop"
+          }
+        }
+      }
+    }
+  }
+}
