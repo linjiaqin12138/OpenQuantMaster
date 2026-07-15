@@ -1,0 +1,17 @@
+app_name: OpenQuantMaster
+environment: development
+
+paths:
+  artifacts: ./artifacts
+  logs: ./logs
+  database: ./data/runtime.db
+
+scheduler:
+  timezone: UTC
+
+event_bus:
+  backend: memory
+
+logging:
+  level: INFO
+  format: json
