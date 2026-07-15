@@ -1,3 +1,6 @@
+import subprocess
+import sys
+
 import pytest
 import pytest_asyncio
 
@@ -60,3 +63,29 @@ async def test_scheduler_run_now_triggers_runner(boot):
 
     run_id = await boot.scheduler.run_now("hello_pipeline")
     assert run_id is not None
+
+
+@pytest.mark.integration
+def test_cli_preflight():
+    result = subprocess.run(
+        [sys.executable, "-m", "runtime.daemon", "--preflight"],
+        cwd="/home/jqlin/Project/OpenQuantMaster",
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Preflight checks passed" in result.stdout
+
+
+@pytest.mark.integration
+def test_cli_run_hello_pipeline():
+    result = subprocess.run(
+        [sys.executable, "-m", "runtime.daemon", "--run", "hello_pipeline"],
+        cwd="/home/jqlin/Project/OpenQuantMaster",
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "finished with status: completed" in result.stdout
