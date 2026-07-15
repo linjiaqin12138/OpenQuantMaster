@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from .models import Base, RunStatus, TriggerType
+from .models import ArtifactRef, Base, CheckpointRecord, PipelineRun, RunStatus, StageRun, TriggerType
 from .repositories import (
     ArtifactRefRepository,
     CheckpointRepository,

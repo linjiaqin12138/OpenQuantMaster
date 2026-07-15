@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 
 from runtime.state_store.database import StateStore
 

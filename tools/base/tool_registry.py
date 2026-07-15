@@ -3,7 +3,6 @@ from __future__ import annotations
 import inspect
 import pkgutil
 from types import ModuleType
-from typing import Type
 
 from .base_tool import BaseTool
 

@@ -59,7 +59,6 @@ async def test_bootstrap_fails_on_missing_config():
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_scheduler_run_now_triggers_runner(boot):
-    from runtime.pipeline_runner.runner import PipelineRunner
 
     run_id = await boot.scheduler.run_now("hello_pipeline")
     assert run_id is not None
