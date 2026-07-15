@@ -27,6 +27,10 @@ class StateStore:
 
     async def init(self) -> None:
         self.artifacts_path.mkdir(parents=True, exist_ok=True)
+        if self.database_url.startswith("sqlite"):
+            db_path_str = self.database_url.split(":///", 1)[1]
+            db_path = Path(db_path_str)
+            db_path.parent.mkdir(parents=True, exist_ok=True)
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
@@ -34,12 +38,12 @@ class StateStore:
         await self._engine.dispose()
 
     async def create_pipeline_run(
-        self, pipeline_name: str, trigger_type: TriggerType = TriggerType.manual
+        self, pipeline_name: str, trigger_type: TriggerType = TriggerType.manual, run_id: uuid.UUID | None = None
     ) -> "PipelineRun":
         async with self._session_factory() as session:
             async with session.begin():
                 repo = PipelineRunRepository(session)
-                return await repo.create(pipeline_name=pipeline_name, trigger_type=trigger_type)
+                return await repo.create(pipeline_name=pipeline_name, trigger_type=trigger_type, run_id=run_id)
 
     async def update_pipeline_run_status(
         self,

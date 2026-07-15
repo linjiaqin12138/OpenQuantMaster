@@ -69,9 +69,10 @@ def load_config(config_path: Path | str | None = None, **overrides: Any) -> Runt
     kwargs: dict[str, Any] = {}
     if config_path is not None:
         path = Path(config_path)
-        if path.exists():
-            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            kwargs.update(raw)
+        if not path.exists():
+            raise FileNotFoundError(f"Configuration file not found: {path}")
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        kwargs.update(raw)
         kwargs["config_path"] = path
     kwargs.update(_load_env_overrides())
     kwargs.update(overrides)

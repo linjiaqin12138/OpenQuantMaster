@@ -13,8 +13,10 @@ class PipelineRunRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def create(self, pipeline_name: str, trigger_type: TriggerType = TriggerType.manual) -> PipelineRun:
+    async def create(self, pipeline_name: str, trigger_type: TriggerType = TriggerType.manual, run_id: uuid.UUID | None = None) -> PipelineRun:
         run = PipelineRun(pipeline_name=pipeline_name, trigger_type=trigger_type)
+        if run_id is not None:
+            run.id = run_id
         self._session.add(run)
         await self._session.flush()
         return run
