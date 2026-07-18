@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+import asyncio
+from datetime import datetime, timezone
 from typing import Any, ClassVar, Literal
 
 import akshare as ak
@@ -53,11 +54,9 @@ class OHLCVTool(BaseTool):
         if market == "crypto" or source == "ccxt":
             df = await self._fetch_crypto(cfg, symbol, interval, inputs)
         elif market in ("us_equity", "hk_equity") or source == "yfinance":
-            df = self._fetch_yfinance(symbol, interval, inputs)
+            df = await asyncio.to_thread(self._fetch_yfinance, symbol, interval, inputs)
         elif market == "a_share":
             df = await self._fetch_a_share(cfg, symbol, interval, inputs)
-        else:
-            return ToolResult(success=False, error=f"Unsupported market: {market}")
 
         csv_content = self._dataframe_to_csv(df)
         artifact_name = f"ohlcv_{symbol.replace('/', '_')}_{interval}.csv"
@@ -154,11 +153,13 @@ class OHLCVTool(BaseTool):
         token = cfg.market_data.equities.tushare_token
         if (source == "tushare" or (source is None and token)):
             try:
-                return self._fetch_tushare(symbol, interval, inputs, token)
+                return await asyncio.to_thread(
+                    self._fetch_tushare, symbol, interval, inputs, token
+                )
             except Exception:
                 if source == "tushare":
                     raise
-        return self._fetch_akshare(symbol, interval, inputs)
+        return await asyncio.to_thread(self._fetch_akshare, symbol, interval, inputs)
 
     def _fetch_tushare(
         self,
@@ -224,4 +225,6 @@ class OHLCVTool(BaseTool):
         if not value:
             return None
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
         return int(dt.timestamp() * 1000)
