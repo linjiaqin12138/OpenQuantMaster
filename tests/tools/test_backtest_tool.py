@@ -1,12 +1,10 @@
 import json
 from pathlib import Path
-from typing import Any, ClassVar
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from pydantic import BaseModel
 
-from tools.research.backtest_tool import BacktestInput, BacktestOutput, BacktestTool
+from tools.research.backtest_tool import BacktestTool
 
 
 @pytest.mark.unit
@@ -25,7 +23,7 @@ vibe_trading:
 """
     )
 
-    def fake_run(cmd, *args, **kwargs):
+    async def fake_create_subprocess_exec(*cmd, **kwargs):
         output_dir = Path(kwargs["cwd"])
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "equity.csv").write_text("date,equity\n2026-01-01,10000\n")
@@ -33,13 +31,15 @@ vibe_trading:
         (output_dir / "metrics.csv").write_text("metric,value\nsharpe,1.5\n")
         run_card = {"sharpe": 1.5, "max_drawdown_pct": -0.05, "total_return_pct": 0.12}
         (output_dir / "run_card.json").write_text(json.dumps(run_card))
-        class Result:
-            returncode = 0
-            stdout = ""
-            stderr = ""
-        return Result()
+        fake_process = AsyncMock()
+        fake_process.returncode = 0
+        fake_process.communicate.return_value = (b"", b"")
+        return fake_process
 
-    with patch("subprocess.run", side_effect=fake_run):
+    with patch(
+        "tools.research.backtest_tool.asyncio.create_subprocess_exec",
+        side_effect=fake_create_subprocess_exec,
+    ):
         tool = BacktestTool()
         result = await tool.execute(
             {
@@ -57,6 +57,9 @@ vibe_trading:
     assert len(result.artifacts) == 4
     artifact_names = {a.name for a in result.artifacts}
     assert artifact_names == {"equity.csv", "trades.csv", "metrics.csv", "run_card.json"}
+    for artifact in result.artifacts:
+        assert artifact.sha256
+        assert len(artifact.sha256) == 64
 
 
 @pytest.mark.unit
@@ -70,7 +73,9 @@ async def test_backtest_tool_reads_existing_run_dir(tmp_path, monkeypatch):
     (run_dir / "equity.csv").write_text("date,equity\n2026-01-01,10000\n")
     (run_dir / "trades.csv").write_text("id,symbol,side\n1,BTCUSDT,buy\n")
     (run_dir / "metrics.csv").write_text("metric,value\nsharpe,1.5\n")
-    (run_dir / "run_card.json").write_text(json.dumps({"sharpe": 1.5, "max_drawdown_pct": -0.05, "total_return_pct": 0.12}))
+    (run_dir / "run_card.json").write_text(
+        json.dumps({"sharpe": 1.5, "max_drawdown_pct": -0.05, "total_return_pct": 0.12})
+    )
 
     tool = BacktestTool()
     result = await tool.execute(
@@ -83,3 +88,6 @@ async def test_backtest_tool_reads_existing_run_dir(tmp_path, monkeypatch):
 
     assert result.success is True
     assert result.data["sharpe"] == 1.5
+    for artifact in result.artifacts:
+        assert artifact.sha256
+        assert len(artifact.sha256) == 64

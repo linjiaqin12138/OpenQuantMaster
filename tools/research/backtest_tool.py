@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
-import subprocess
 import tempfile
 import uuid
 from pathlib import Path
@@ -103,9 +104,15 @@ class BacktestTool(BaseTool):
         if inputs.get("end"):
             cmd.extend(["--end", inputs["end"]])
 
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(tmpdir), check=False)
-        if result.returncode != 0:
-            raise RuntimeError(f"Vibe-Trading CLI failed: {result.stderr}")
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(tmpdir),
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"Vibe-Trading CLI failed: {stderr.decode('utf-8')}")
         return tmpdir
 
     async def _call_http(self, cfg: Any, inputs: dict[str, Any], run_id: str) -> Path:
@@ -115,8 +122,9 @@ class BacktestTool(BaseTool):
         raise NotImplementedError("MCP Vibe-Trading mode is not implemented in Milestone 2")
 
     def _collect_artifacts(self, output_dir: Path) -> list[ArtifactRef]:
+        expected = ("equity.csv", "trades.csv", "metrics.csv", "run_card.json")
         artifacts = []
-        for filename in ("equity.csv", "trades.csv", "metrics.csv", "run_card.json"):
+        for filename in expected:
             path = output_dir / filename
             if not path.exists():
                 continue
@@ -126,9 +134,14 @@ class BacktestTool(BaseTool):
                     name=filename,
                     mime_type="application/json" if filename.endswith(".json") else "text/csv",
                     relative_path=filename,
-                    sha256="",
+                    sha256=hashlib.sha256(content.encode("utf-8")).hexdigest(),
                     content=content,
                 )
+            )
+        if not artifacts:
+            raise RuntimeError(
+                f"No artifacts found in backtest output dir: {output_dir} "
+                f"(expected any of: {', '.join(expected)})"
             )
         return artifacts
 
@@ -138,5 +151,5 @@ class BacktestTool(BaseTool):
             return {}
         try:
             return json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return {}
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON in run_card {path}: {exc}") from exc
