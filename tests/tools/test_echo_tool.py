@@ -12,8 +12,9 @@ def test_registry_discovers_echo_tool():
 
     registry = ToolRegistry()
     count = registry.discover(tools)
-    assert count == 1
-    assert registry.list_tools() == ["echo_tool"]
+    assert count >= 1
+    assert "echo_tool" in registry.list_tools()
+    assert "ohlcv_tool" in registry.list_tools()
 
 
 @pytest.mark.unit
