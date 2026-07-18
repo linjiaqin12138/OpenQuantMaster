@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import structlog
 import yaml
 from apscheduler import AsyncScheduler
 from apscheduler._enums import ConflictPolicy
@@ -12,6 +13,8 @@ from apscheduler.triggers.cron import CronTrigger
 
 if TYPE_CHECKING:
     from runtime.pipeline_runner.runner import PipelineRunner
+
+logger = structlog.get_logger()
 
 
 def _parse_cron(cron: str) -> dict[str, Any]:
@@ -29,9 +32,17 @@ def _parse_cron(cron: str) -> dict[str, Any]:
     }
 
 
-async def _cron_executor(runner: PipelineRunner, name: str, inputs: dict[str, Any] | None, run_id: uuid.UUID) -> None:
-    """Module-level wrapper so APScheduler can reference the callable."""
-    await runner.run_pipeline(name, inputs=inputs, run_id=run_id)
+async def _cron_executor(
+    runner: PipelineRunner,
+    name: str,
+    inputs: dict[str, Any] | None,
+) -> None:
+    """Module-level wrapper so APScheduler can reference the callable.
+
+    Generates a fresh ``run_id`` for every cron firing to avoid primary-key
+    collisions when the schedule is created once but executed repeatedly.
+    """
+    await runner.run_pipeline(name, inputs=inputs, run_id=uuid.uuid4())
 
 
 class APSchedulerAdapter:
@@ -87,7 +98,12 @@ class APSchedulerAdapter:
         for manifest_path in pipelines_dir.glob("*.yaml"):
             try:
                 manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "scheduler.manifest_parse_failed",
+                    path=str(manifest_path),
+                    error=str(exc),
+                )
                 continue
             trigger = manifest.get("trigger", {})
             if trigger.get("type") != "cron":
@@ -99,6 +115,6 @@ class APSchedulerAdapter:
                 CronTrigger(**_parse_cron(cron_expr), timezone=tz),
                 id=f"cron:{manifest['name']}",
                 args=(self._runner, manifest["name"]),
-                kwargs={"inputs": {}, "run_id": uuid.uuid4()},
+                kwargs={"inputs": manifest.get("inputs", {})},
                 conflict_policy=ConflictPolicy.replace,
             )

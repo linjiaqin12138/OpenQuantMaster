@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import uuid
@@ -193,7 +194,7 @@ class PipelineRunner:
             artifact_models.append(model)
             context.artifacts.append(artifact)
 
-        if "signals" in result.data:
+        if "signals" in result.data and isinstance(result.data["signals"], list):
             await self._persist_signals(run_id, stage_run.id, result.data["signals"])
 
         context.outputs[stage_name] = result.data
@@ -245,13 +246,14 @@ class PipelineRunner:
         artifact: ArtifactRefData,
     ) -> ArtifactRefModel:
         artifact_dir = self._config.paths.artifacts / str(run_id) / stage_name
-        artifact_dir.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(artifact_dir.mkdir, parents=True, exist_ok=True)
         dest = artifact_dir / artifact.name
         if artifact.content is not None:
-            dest.write_text(artifact.content, encoding="utf-8")
-        elif not dest.exists():
-            dest.write_text(f"# artifact {artifact.name}\n", encoding="utf-8")
-        sha256 = hashlib.sha256(dest.read_bytes()).hexdigest()
+            await asyncio.to_thread(dest.write_text, artifact.content, encoding="utf-8")
+        elif not await asyncio.to_thread(dest.exists):
+            await asyncio.to_thread(dest.write_text, f"# artifact {artifact.name}\n", encoding="utf-8")
+        content_bytes = await asyncio.to_thread(dest.read_bytes)
+        sha256 = hashlib.sha256(content_bytes).hexdigest()
         relative_path = str(dest.relative_to(self._config.paths.artifacts))
         return await self._store.create_artifact_ref(
             pipeline_run_id=run_id,

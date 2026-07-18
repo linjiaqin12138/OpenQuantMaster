@@ -4,15 +4,14 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any, ClassVar, Literal
 
-import akshare as ak
-import ccxt.async_support as ccxt
 import pandas as pd
-import tushare as ts
-import yfinance as yf
+import structlog
 from pydantic import BaseModel, Field
 
 from tools.base.base_tool import BaseTool
 from tools.base.tool_result import ArtifactRef, ToolResult
+
+logger = structlog.get_logger()
 
 
 class OHLCVInput(BaseModel):
@@ -57,6 +56,8 @@ class OHLCVTool(BaseTool):
             df = await asyncio.to_thread(self._fetch_yfinance, symbol, interval, inputs)
         elif market == "a_share":
             df = await self._fetch_a_share(cfg, symbol, interval, inputs)
+        else:
+            return ToolResult(success=False, error=f"Unsupported market: {market}")
 
         csv_content = self._dataframe_to_csv(df)
         artifact_name = f"ohlcv_{symbol.replace('/', '_')}_{interval}.csv"
@@ -83,6 +84,8 @@ class OHLCVTool(BaseTool):
         interval: str,
         inputs: dict[str, Any],
     ) -> pd.DataFrame:
+        import ccxt.async_support as ccxt
+
         exchange_id = cfg.market_data.crypto.default_exchange
         exchange_class = getattr(ccxt, exchange_id, None)
         if exchange_class is None:
@@ -118,6 +121,8 @@ class OHLCVTool(BaseTool):
         interval: str,
         inputs: dict[str, Any],
     ) -> pd.DataFrame:
+        import yfinance as yf
+
         ticker = yf.Ticker(symbol)
         kwargs: dict[str, Any] = {"interval": interval}
         if inputs.get("start"):
@@ -151,12 +156,18 @@ class OHLCVTool(BaseTool):
     ) -> pd.DataFrame:
         source = inputs.get("source")
         token = cfg.market_data.equities.tushare_token
-        if (source == "tushare" or (source is None and token)):
+        if source == "tushare" or (source is None and token):
             try:
                 return await asyncio.to_thread(
                     self._fetch_tushare, symbol, interval, inputs, token
                 )
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "ohlcv.tushare_failed",
+                    symbol=symbol,
+                    interval=interval,
+                    error=str(exc),
+                )
                 if source == "tushare":
                     raise
         return await asyncio.to_thread(self._fetch_akshare, symbol, interval, inputs)
@@ -168,6 +179,8 @@ class OHLCVTool(BaseTool):
         inputs: dict[str, Any],
         token: str,
     ) -> pd.DataFrame:
+        import tushare as ts
+
         ts.set_token(token)
         pro = ts.pro_api()
         start = inputs.get("start", "")[:10].replace("-", "")
@@ -193,11 +206,13 @@ class OHLCVTool(BaseTool):
         interval: str,
         inputs: dict[str, Any],
     ) -> pd.DataFrame:
+        import akshare as ak
+
         # Strip exchange suffix, e.g. 000001.SZ -> 000001
         code = symbol.split(".")[0]
         start = inputs.get("start", "")[:10].replace("-", "")
         end = inputs.get("end", "")[:10].replace("-", "")
-        period = "daily" if interval in ("1d", "d", "D") else "daily"
+        period = self._map_akshare_period(interval)
         df = ak.stock_zh_a_hist(
             symbol=code,
             period=period,
@@ -222,9 +237,32 @@ class OHLCVTool(BaseTool):
         return df.to_csv(index=False)
 
     def _iso_to_ms(self, value: str | None) -> int | None:
-        if not value:
+        if value is None:
             return None
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return int(dt.timestamp() * 1000)
+
+    def _map_akshare_period(self, interval: str) -> str:
+        mapping = {
+            "1d": "daily",
+            "d": "daily",
+            "D": "daily",
+            "1w": "weekly",
+            "w": "weekly",
+            "W": "weekly",
+            "1M": "monthly",
+            "m": "monthly",
+            "M": "monthly",
+            "monthly": "monthly",
+        }
+        period = mapping.get(interval)
+        if period is None:
+            logger.warning(
+                "ohlcv.unsupported_a_share_interval",
+                interval=interval,
+                default="daily",
+            )
+            return "daily"
+        return period

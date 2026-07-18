@@ -60,14 +60,9 @@ class BacktestTool(BaseTool):
         else:
             return ToolResult(success=False, error=f"Unsupported vibe_trading mode: {mode}")
 
-        artifacts = self._collect_artifacts(output_dir)
-        if not artifacts:
-            return ToolResult(
-                success=False,
-                error=f"No artifacts found in backtest output dir: {output_dir}",
-            )
+        artifacts = await self._collect_artifacts(output_dir)
 
-        metrics = self._read_run_card(output_dir)
+        metrics = await self._read_run_card(output_dir)
         output = self.output_model(
             run_id=run_id,
             metrics_artifact="metrics.csv",
@@ -112,7 +107,10 @@ class BacktestTool(BaseTool):
         )
         stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
-            raise RuntimeError(f"Vibe-Trading CLI failed: {stderr.decode('utf-8')}")
+            raise RuntimeError(
+                f"Vibe-Trading CLI failed: {stderr.decode('utf-8')}\n"
+                f"stdout: {stdout.decode('utf-8')}"
+            )
         return tmpdir
 
     async def _call_http(self, cfg: Any, inputs: dict[str, Any], run_id: str) -> Path:
@@ -121,14 +119,14 @@ class BacktestTool(BaseTool):
     async def _call_mcp(self, cfg: Any, inputs: dict[str, Any], run_id: str) -> Path:
         raise NotImplementedError("MCP Vibe-Trading mode is not implemented in Milestone 2")
 
-    def _collect_artifacts(self, output_dir: Path) -> list[ArtifactRef]:
+    async def _collect_artifacts(self, output_dir: Path) -> list[ArtifactRef]:
         expected = ("equity.csv", "trades.csv", "metrics.csv", "run_card.json")
         artifacts = []
         for filename in expected:
             path = output_dir / filename
-            if not path.exists():
+            if not await asyncio.to_thread(path.exists):
                 continue
-            content = path.read_text(encoding="utf-8")
+            content = await asyncio.to_thread(path.read_text, encoding="utf-8")
             artifacts.append(
                 ArtifactRef(
                     name=filename,
@@ -145,11 +143,12 @@ class BacktestTool(BaseTool):
             )
         return artifacts
 
-    def _read_run_card(self, output_dir: Path) -> dict[str, Any]:
+    async def _read_run_card(self, output_dir: Path) -> dict[str, Any]:
         path = output_dir / "run_card.json"
-        if not path.exists():
+        if not await asyncio.to_thread(path.exists):
             return {}
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            text = await asyncio.to_thread(path.read_text, encoding="utf-8")
+            return json.loads(text)
         except json.JSONDecodeError as exc:
             raise ValueError(f"Invalid JSON in run_card {path}: {exc}") from exc

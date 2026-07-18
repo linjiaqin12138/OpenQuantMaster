@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
@@ -130,8 +131,6 @@ class SignalRepository:
         status: SignalStatus | None = None,
         limit: int = 100,
     ) -> list[SignalRecord]:
-        from sqlalchemy import select
-
         stmt = select(SignalRecord).where(SignalRecord.strategy_id == strategy_id)
         if status is not None:
             stmt = stmt.where(SignalRecord.status == status)

@@ -43,7 +43,7 @@ market_data:
 
     fake_ccxt_module = type("ccxt", (), {"binance": FakeExchange})()
 
-    with patch("tools.market_data.ohlcv_tool.ccxt", fake_ccxt_module):
+    with patch.dict("sys.modules", {"ccxt.async_support": fake_ccxt_module}):
         tool = OHLCVTool()
         result = await tool.execute(
             {
@@ -94,7 +94,7 @@ async def test_ohlcv_tool_fetches_us_equity_yfinance(tmp_path, monkeypatch):
     fake_ticker = MagicMock()
     fake_ticker.history.return_value = fake_hist
 
-    with patch("tools.market_data.ohlcv_tool.yf.Ticker", return_value=fake_ticker):
+    with patch("yfinance.Ticker", return_value=fake_ticker):
         tool = OHLCVTool()
         result = await tool.execute(
             {"symbol": "AAPL", "market": "us_equity", "interval": "1d"}
@@ -129,7 +129,7 @@ market_data:
         }
     )
 
-    with patch("tools.market_data.ohlcv_tool.ak.stock_zh_a_hist", return_value=fake_df):
+    with patch("akshare.stock_zh_a_hist", return_value=fake_df):
         tool = OHLCVTool()
         result = await tool.execute(
             {"symbol": "000001.SZ", "market": "a_share", "interval": "1d"}

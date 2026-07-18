@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import structlog
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -10,6 +11,8 @@ from pydantic import BaseModel, Field
 
 from tools.base.base_tool import BaseTool
 from tools.base.tool_result import ArtifactRef, ToolResult
+
+logger = structlog.get_logger()
 
 
 class SignalScanInput(BaseModel):
@@ -85,7 +88,12 @@ class SignalScanTool(BaseTool):
                 data = json.loads(
                     await asyncio.to_thread(run_card.read_text, encoding="utf-8")
                 )
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "signal_scan.run_card_parse_failed",
+                    path=str(run_card),
+                    error=str(exc),
+                )
                 continue
             if data.get("strategy_id") != strategy_id:
                 continue
@@ -105,7 +113,12 @@ class SignalScanTool(BaseTool):
             raw = json.loads(
                 await asyncio.to_thread(signals_file.read_text, encoding="utf-8")
             )
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "signal_scan.signals_parse_failed",
+                path=str(signals_file),
+                error=str(exc),
+            )
             return []
         if not isinstance(raw, list):
             return []
@@ -129,7 +142,7 @@ class SignalScanTool(BaseTool):
         return normalized
 
     def _normalize_timestamp(self, value: str | int | float | None) -> str:
-        if not value:
+        if value is None:
             return datetime.now(timezone.utc).isoformat()
         if isinstance(value, (int, float)):
             return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()

@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import DateTime, Enum as SQLEnum, Float, ForeignKey, Integer, JSON, String, Text
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import DateTime, Enum as SQLEnum, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
