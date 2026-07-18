@@ -1,0 +1,14 @@
+name: market_open_review
+version: "1.0"
+description: A-share morning data pull.
+trigger:
+  type: cron
+  cron: "0 9 * * 1-5"
+  timezone: "Asia/Shanghai"
+stages:
+  - name: fetch_watchlist_ohlcv
+    tool: ohlcv_tool
+    inputs:
+      symbol: "000001.SZ"
+      market: "a_share"
+      interval: "1d"

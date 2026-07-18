@@ -1,0 +1,21 @@
+name: crypto_signal_fired
+version: "1.0"
+description: 15-minute crypto scan using CCXT data and Vibe-Trading signals.
+trigger:
+  type: cron
+  cron: "*/15 * * * *"
+  timezone: UTC
+stages:
+  - name: fetch_ohlcv
+    tool: ohlcv_tool
+    inputs:
+      symbol: "SOLUSDT.P"
+      market: "crypto"
+      interval: "15m"
+
+  - name: scan_signals
+    tool: signal_scan_tool
+    inputs:
+      strategy_id: "dual_ema_v1"
+      market: "crypto"
+      watch_dir: "./vibe_runs"

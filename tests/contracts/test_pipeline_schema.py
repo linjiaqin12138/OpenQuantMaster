@@ -2,8 +2,8 @@ import json
 from pathlib import Path
 
 import jsonschema
-import yaml
 import pytest
+import yaml
 
 SCHEMAS_DIR = Path(__file__).parents[2] / "schemas"
 PIPELINES_DIR = Path(__file__).parents[2] / "pipelines"
@@ -17,3 +17,15 @@ def test_hello_pipeline_validates():
     assert instance["name"] == "hello_pipeline"
     assert len(instance["stages"]) >= 1
     assert instance["stages"][0]["tool"] == "echo_tool"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "manifest_name",
+    ["crypto_signal_fired", "backtest_demo", "market_open_review"],
+)
+def test_m2_sample_pipeline_validates(manifest_name):
+    schema = json.loads((SCHEMAS_DIR / "pipeline_manifest.schema.json").read_text())
+    instance = yaml.safe_load((PIPELINES_DIR / f"{manifest_name}.yaml").read_text())
+    jsonschema.validate(instance=instance, schema=schema)
+    assert instance["name"] == manifest_name

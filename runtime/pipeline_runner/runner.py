@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,7 @@ from pydantic import ValidationError
 from runtime.config_loader import RuntimeConfig
 from runtime.event_bus.memory_bus import MemoryEventBus
 from runtime.state_store.database import StateStore
-from runtime.state_store.models import ArtifactRef as ArtifactRefModel, RunStatus
+from runtime.state_store.models import ArtifactRef as ArtifactRefModel, MarketType, RunStatus, SignalSide
 from tools.base.tool_registry import ToolNotFoundError, ToolRegistry
 from tools.base.tool_result import ArtifactRef as ArtifactRefData
 
@@ -192,6 +193,9 @@ class PipelineRunner:
             artifact_models.append(model)
             context.artifacts.append(artifact)
 
+        if "signals" in result.data:
+            await self._persist_signals(run_id, stage_run.id, result.data["signals"])
+
         context.outputs[stage_name] = result.data
         context.metadata[stage_name] = {
             "cost_usd": result.cost_usd,
@@ -257,3 +261,42 @@ class PipelineRunner:
             relative_path=relative_path,
             sha256=sha256,
         )
+
+    async def _persist_signals(
+        self,
+        run_id: uuid.UUID,
+        stage_run_id: uuid.UUID,
+        signals: list[dict[str, Any]],
+    ) -> None:
+        for raw in signals:
+            try:
+                market = MarketType(raw.get("market", "crypto"))
+                side = SignalSide(raw.get("side", "long"))
+                triggered_at = self._parse_signal_timestamp(raw.get("generated_at"))
+                valid_until = self._parse_signal_timestamp(raw.get("valid_until")) if raw.get("valid_until") else None
+                await self._store.create_signal(
+                    source=raw.get("source", "internal"),
+                    strategy_id=raw.get("strategy_id", ""),
+                    symbol=raw.get("symbol", ""),
+                    market=market,
+                    side=side,
+                    strength=float(raw.get("strength", 0.0)),
+                    triggered_at=triggered_at,
+                    valid_until=valid_until,
+                    payload=raw.get("metadata", {}),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "signal.persist.failed",
+                    run_id=str(run_id),
+                    stage_run_id=str(stage_run_id),
+                    error=str(exc),
+                )
+
+    def _parse_signal_timestamp(self, value: str | int | float | None) -> datetime:
+        if value is None:
+            return datetime.now(timezone.utc)
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value, tz=timezone.utc)
+        text = str(value).replace("Z", "+00:00")
+        return datetime.fromisoformat(text)

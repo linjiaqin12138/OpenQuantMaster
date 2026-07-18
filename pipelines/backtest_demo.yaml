@@ -1,0 +1,14 @@
+name: backtest_demo
+version: "1.0"
+description: Research-only backtest runner.
+trigger:
+  type: manual
+stages:
+  - name: backtest
+    tool: backtest_tool
+    inputs:
+      strategy_description: "dual EMA on SOLUSDT.P"
+      market: "crypto"
+      symbols: ["SOLUSDT.P"]
+      start: "2026-01-01"
+      end: "2026-06-30"
