@@ -22,3 +22,4 @@ data/
 # Claude Code worktrees
 .claude/
 .worktrees/
+uv.lock
