@@ -7,11 +7,22 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from .models import ArtifactRef, Base, CheckpointRecord, PipelineRun, RunStatus, StageRun, TriggerType
+from .models import (
+    ArtifactRef,
+    Base,
+    CheckpointRecord,
+    PipelineRun,
+    RunStatus,
+    SignalRecord,
+    SignalStatus,
+    StageRun,
+    TriggerType,
+)
 from .repositories import (
     ArtifactRefRepository,
     CheckpointRepository,
     PipelineRunRepository,
+    SignalRepository,
     StageRunRepository,
 )
 
@@ -125,3 +136,23 @@ class StateStore:
                     stage_name=stage_name,
                     snapshot_json=snapshot_json,
                 )
+
+    async def create_signal(self, **kwargs: Any) -> "SignalRecord":
+        async with self._session_factory() as session:
+            async with session.begin():
+                repo = SignalRepository(session)
+                return await repo.create(**kwargs)
+
+    async def list_signals(
+        self,
+        strategy_id: str,
+        status: SignalStatus | None = None,
+        limit: int = 100,
+    ) -> "list[SignalRecord]":
+        async with self._session_factory() as session:
+            repo = SignalRepository(session)
+            return await repo.list_by_strategy(
+                strategy_id=strategy_id,
+                status=status,
+                limit=limit,
+            )

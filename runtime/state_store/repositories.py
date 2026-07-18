@@ -6,7 +6,16 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import ArtifactRef, CheckpointRecord, PipelineRun, RunStatus, StageRun, TriggerType
+from .models import (
+    ArtifactRef,
+    CheckpointRecord,
+    PipelineRun,
+    RunStatus,
+    SignalRecord,
+    SignalStatus,
+    StageRun,
+    TriggerType,
+)
 
 
 class PipelineRunRepository:
@@ -103,6 +112,32 @@ class ArtifactRefRepository:
         self._session.add(ref)
         await self._session.flush()
         return ref
+
+
+class SignalRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(self, **kwargs: Any) -> SignalRecord:
+        signal = SignalRecord(**kwargs)
+        self._session.add(signal)
+        await self._session.flush()
+        return signal
+
+    async def list_by_strategy(
+        self,
+        strategy_id: str,
+        status: SignalStatus | None = None,
+        limit: int = 100,
+    ) -> list[SignalRecord]:
+        from sqlalchemy import select
+
+        stmt = select(SignalRecord).where(SignalRecord.strategy_id == strategy_id)
+        if status is not None:
+            stmt = stmt.where(SignalRecord.status == status)
+        stmt = stmt.order_by(SignalRecord.triggered_at.desc()).limit(limit)
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
 
 
 class CheckpointRepository:

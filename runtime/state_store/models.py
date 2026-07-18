@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Any
 
 from sqlalchemy import DateTime, Enum as SQLEnum, Float, ForeignKey, Integer, JSON, String, Text
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -116,4 +117,75 @@ class CheckpointRecord(Base):
 
     def __init__(self, **kwargs: Any) -> None:
         kwargs.setdefault("created_at", utc_now())
+        super().__init__(**kwargs)
+
+
+class MarketType(str, Enum):
+    crypto = "crypto"
+    a_share = "a_share"
+    us_equity = "us_equity"
+    hk_equity = "hk_equity"
+
+
+class SignalSide(str, Enum):
+    long = "long"
+    short = "short"
+    close = "close"
+    reduce = "reduce"
+
+
+class SignalStatus(str, Enum):
+    pending = "pending"
+    accepted = "accepted"
+    rejected = "rejected"
+    expired = "expired"
+
+
+class Signal(BaseModel):
+    """Pydantic contract for a trading signal.
+
+    This model is the source of truth for ``schemas/signal.schema.json`` and for
+    runtime validation.  Field names and semantics match the ORM model below.
+    """
+
+    model_config = ConfigDict(
+        use_enum_values=False,
+        json_schema_extra={"$schema": "https://json-schema.org/draft/2020-12/schema"},
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    source: str
+    strategy_id: str
+    symbol: str
+    market: MarketType
+    side: SignalSide
+    strength: float = 0.0
+    triggered_at: datetime = Field(default_factory=utc_now)
+    valid_until: datetime | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+    status: SignalStatus = SignalStatus.pending
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class SignalRecord(Base):
+    __tablename__ = "signals"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    source: Mapped[str] = mapped_column(String(255), nullable=False)
+    strategy_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    symbol: Mapped[str] = mapped_column(String(63), nullable=False, index=True)
+    market: Mapped[MarketType] = mapped_column(SQLEnum(MarketType), nullable=False)
+    side: Mapped[SignalSide] = mapped_column(SQLEnum(SignalSide), nullable=False)
+    strength: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    triggered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    status: Mapped[SignalStatus] = mapped_column(SQLEnum(SignalStatus), default=SignalStatus.pending)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    def __init__(self, **kwargs: Any) -> None:
+        kwargs.setdefault("payload", {})
+        kwargs.setdefault("status", SignalStatus.pending)
+        kwargs.setdefault("created_at", utc_now())
+        kwargs.setdefault("strength", 0.0)
         super().__init__(**kwargs)

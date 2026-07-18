@@ -1,0 +1,107 @@
+{
+  "$defs": {
+    "MarketType": {
+      "enum": [
+        "crypto",
+        "a_share",
+        "us_equity",
+        "hk_equity"
+      ],
+      "title": "MarketType",
+      "type": "string"
+    },
+    "SignalSide": {
+      "enum": [
+        "long",
+        "short",
+        "close",
+        "reduce"
+      ],
+      "title": "SignalSide",
+      "type": "string"
+    },
+    "SignalStatus": {
+      "enum": [
+        "pending",
+        "accepted",
+        "rejected",
+        "expired"
+      ],
+      "title": "SignalStatus",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Pydantic contract for a trading signal.\n\nThis model is the source of truth for ``schemas/signal.schema.json`` and for\nruntime validation.  Field names and semantics match the ORM model below.",
+  "properties": {
+    "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+    },
+    "source": {
+      "title": "Source",
+      "type": "string"
+    },
+    "strategy_id": {
+      "title": "Strategy Id",
+      "type": "string"
+    },
+    "symbol": {
+      "title": "Symbol",
+      "type": "string"
+    },
+    "market": {
+      "$ref": "#/$defs/MarketType"
+    },
+    "side": {
+      "$ref": "#/$defs/SignalSide"
+    },
+    "strength": {
+      "default": 0.0,
+      "title": "Strength",
+      "type": "number"
+    },
+    "triggered_at": {
+      "format": "date-time",
+      "title": "Triggered At",
+      "type": "string"
+    },
+    "valid_until": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Valid Until"
+    },
+    "payload": {
+      "additionalProperties": true,
+      "title": "Payload",
+      "type": "object"
+    },
+    "status": {
+      "$ref": "#/$defs/SignalStatus",
+      "default": "pending"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "source",
+    "strategy_id",
+    "symbol",
+    "market",
+    "side"
+  ],
+  "title": "Signal",
+  "type": "object"
+}
