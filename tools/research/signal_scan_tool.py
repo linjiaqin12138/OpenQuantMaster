@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,7 +37,7 @@ class SignalScanTool(BaseTool):
         strategy_id = inputs["strategy_id"]
         default_market = inputs["market"]
 
-        latest_run_dir = self._find_latest_run_dir(watch_dir, strategy_id)
+        latest_run_dir = await self._find_latest_run_dir(watch_dir, strategy_id)
         if latest_run_dir is None:
             output = self.output_model(signals=[], artifact="signals.json")
             return ToolResult(
@@ -53,7 +54,7 @@ class SignalScanTool(BaseTool):
                 ],
             )
 
-        signals = self._load_signals(latest_run_dir, strategy_id, default_market)
+        signals = await self._load_signals(latest_run_dir, strategy_id, default_market)
         content = json.dumps(signals, indent=2, default=str)
         output = self.output_model(signals=signals, artifact="signals.json")
         return ToolResult(
@@ -70,36 +71,40 @@ class SignalScanTool(BaseTool):
             ],
         )
 
-    def _find_latest_run_dir(self, watch_dir: Path, strategy_id: str) -> Path | None:
+    async def _find_latest_run_dir(self, watch_dir: Path, strategy_id: str) -> Path | None:
         candidates: list[tuple[Path, float]] = []
-        if not watch_dir.exists():
+        if not await asyncio.to_thread(watch_dir.exists):
             return None
-        for entry in watch_dir.iterdir():
-            if not entry.is_dir():
+        for entry in await asyncio.to_thread(list, watch_dir.iterdir()):
+            if not await asyncio.to_thread(entry.is_dir):
                 continue
             run_card = entry / "run_card.json"
-            if not run_card.exists():
+            if not await asyncio.to_thread(run_card.exists):
                 continue
             try:
-                data = json.loads(run_card.read_text(encoding="utf-8"))
+                data = json.loads(
+                    await asyncio.to_thread(run_card.read_text, encoding="utf-8")
+                )
             except Exception:
                 continue
             if data.get("strategy_id") != strategy_id:
                 continue
-            candidates.append((entry, entry.stat().st_mtime))
+            candidates.append((entry, (await asyncio.to_thread(entry.stat)).st_mtime))
         if not candidates:
             return None
         candidates.sort(key=lambda x: x[1], reverse=True)
         return candidates[0][0]
 
-    def _load_signals(
+    async def _load_signals(
         self, run_dir: Path, strategy_id: str, default_market: str
     ) -> list[dict[str, Any]]:
         signals_file = run_dir / "signals.json"
-        if not signals_file.exists():
+        if not await asyncio.to_thread(signals_file.exists):
             return []
         try:
-            raw = json.loads(signals_file.read_text(encoding="utf-8"))
+            raw = json.loads(
+                await asyncio.to_thread(signals_file.read_text, encoding="utf-8")
+            )
         except Exception:
             return []
         if not isinstance(raw, list):
@@ -123,7 +128,7 @@ class SignalScanTool(BaseTool):
             normalized.append(signal)
         return normalized
 
-    def _normalize_timestamp(self, value: str | None) -> str:
+    def _normalize_timestamp(self, value: str | int | float | None) -> str:
         if not value:
             return datetime.now(timezone.utc).isoformat()
         if isinstance(value, (int, float)):
