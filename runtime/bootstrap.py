@@ -77,6 +77,8 @@ async def bootstrap(config_path: Path | str | None = None, package: ModuleType |
             registry=registry,
         )
         scheduler.register_executor(runner)
+        pipelines_dir = Path("pipelines")
+        await scheduler.schedule_pipelines(pipelines_dir)
     except Exception as exc:
         await scheduler.stop()
         await bus.stop()

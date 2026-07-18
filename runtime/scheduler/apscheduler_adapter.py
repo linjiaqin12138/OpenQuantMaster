@@ -2,12 +2,36 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import yaml
 from apscheduler import AsyncScheduler
+from apscheduler._enums import ConflictPolicy
+from apscheduler.triggers.cron import CronTrigger
 
 if TYPE_CHECKING:
     from runtime.pipeline_runner.runner import PipelineRunner
+
+
+def _parse_cron(cron: str) -> dict[str, Any]:
+    """Map a 5-field cron string to APScheduler CronTrigger kwargs."""
+    parts = cron.split()
+    if len(parts) != 5:
+        raise ValueError(f"Invalid cron expression (expected 5 fields): {cron}")
+    minute, hour, day, month, day_of_week = parts
+    return {
+        "minute": minute,
+        "hour": hour,
+        "day": day,
+        "month": month,
+        "day_of_week": day_of_week,
+    }
+
+
+async def _cron_executor(runner: PipelineRunner, name: str, inputs: dict[str, Any] | None, run_id: uuid.UUID) -> None:
+    """Module-level wrapper so APScheduler can reference the callable."""
+    await runner.run_pipeline(name, inputs=inputs, run_id=run_id)
 
 
 class APSchedulerAdapter:
@@ -53,3 +77,28 @@ class APSchedulerAdapter:
             kwargs={"inputs": inputs, "run_id": run_id},
         )
         return run_id
+
+    async def schedule_pipelines(self, pipelines_dir: Path) -> None:
+        if self._runner is None:
+            raise RuntimeError("No runner registered with scheduler")
+        if self._scheduler is None:
+            raise RuntimeError("Scheduler has not been started")
+        await self._scheduler.configure_task(_cron_executor, max_running_jobs=1)
+        for manifest_path in pipelines_dir.glob("*.yaml"):
+            try:
+                manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+            except Exception:
+                continue
+            trigger = manifest.get("trigger", {})
+            if trigger.get("type") != "cron":
+                continue
+            cron_expr = trigger["cron"]
+            tz = trigger.get("timezone", self._timezone)
+            await self._scheduler.add_schedule(
+                _cron_executor,
+                CronTrigger(**_parse_cron(cron_expr), timezone=tz),
+                id=f"cron:{manifest['name']}",
+                args=(self._runner, manifest["name"]),
+                kwargs={"inputs": {}, "run_id": uuid.uuid4()},
+                conflict_policy=ConflictPolicy.replace,
+            )
