@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+.pytest_cache/
+.ruff_cache/
 venv/
 
 # Project runtime data
@@ -22,4 +24,5 @@ data/
 # Claude Code worktrees
 .claude/
 .worktrees/
+.superpowers/
 uv.lock
