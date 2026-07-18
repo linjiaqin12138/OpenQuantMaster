@@ -51,3 +51,18 @@ def test_tool_result_serializes_success_result_with_artifacts():
     assert dumped["success"] is True
     assert len(dumped["artifacts"]) == 1
     assert dumped["artifacts"][0]["name"] == "echo.txt"
+
+
+@pytest.mark.unit
+def test_artifact_ref_supports_optional_content():
+    from tools.base.tool_result import ArtifactRef
+
+    ref = ArtifactRef(
+        name="test.csv",
+        mime_type="text/csv",
+        relative_path="run/stage/test.csv",
+        sha256="a" * 64,
+        content="a,b,c\n1,2,3\n",
+    )
+    dumped = ref.model_dump()
+    assert dumped["content"] == "a,b,c\n1,2,3\n"

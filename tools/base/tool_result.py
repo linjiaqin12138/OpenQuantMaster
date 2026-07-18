@@ -10,6 +10,7 @@ class ArtifactRef(BaseModel):
     mime_type: str
     relative_path: str
     sha256: str
+    content: str | None = Field(default=None, repr=False)
 
 
 class ToolResult(BaseModel):

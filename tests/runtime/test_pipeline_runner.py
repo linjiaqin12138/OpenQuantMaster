@@ -1,9 +1,14 @@
 import pytest
 import pytest_asyncio
 import yaml
+from typing import Any, ClassVar
+from pydantic import BaseModel
 
 from runtime.bootstrap import bootstrap
 from runtime.state_store.models import RunStatus
+from tools.base.base_tool import BaseTool
+from tools.base.tool_result import ArtifactRef, ToolResult
+from tools.demo.echo_tool import EchoInput, EchoOutput
 
 
 @pytest_asyncio.fixture
@@ -82,3 +87,50 @@ async def test_run_pipeline_fails_for_unknown_tool(runner_setup):
     run_id = await runner_setup.runner.run_pipeline("bad_pipeline")
     run = await runner_setup.store.get_pipeline_run(run_id)
     assert run.status == RunStatus.failed
+
+
+class ContentEchoTool(BaseTool):
+    name: ClassVar[str] = "content_echo_tool"
+    version: ClassVar[str] = "0.1.0"
+    capability: ClassVar[str] = "demo"
+    input_model: ClassVar[type[BaseModel]] = EchoInput
+    output_model: ClassVar[type[BaseModel]] = EchoOutput
+
+    async def _execute(self, inputs: dict[str, Any]) -> ToolResult:
+        return ToolResult(
+            success=True,
+            data={"echoed": inputs["message"]},
+            artifacts=[
+                ArtifactRef(
+                    name="echo.txt",
+                    mime_type="text/plain",
+                    relative_path="run/stage/echo.txt",
+                    sha256="a" * 64,
+                    content="hello world",
+                )
+            ],
+        )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_runner_writes_artifact_content(runner_setup):
+    registry = runner_setup.registry
+    registry._tools["content_echo_tool"] = ContentEchoTool()
+    pipelines_dir = runner_setup.runner._pipelines_dir
+    (pipelines_dir / "content_pipeline.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "content_pipeline",
+                "version": "1.0",
+                "stages": [
+                    {"name": "echo", "tool": "content_echo_tool", "inputs": {"message": "hi"}},
+                ],
+            }
+        )
+    )
+    run_id = await runner_setup.runner.run_pipeline("content_pipeline")
+    run = await runner_setup.store.get_pipeline_run(run_id)
+    assert run.status == RunStatus.completed
+    artifact_path = runner_setup.config.paths.artifacts / str(run_id) / "echo" / "echo.txt"
+    assert artifact_path.read_text() == "hello world"

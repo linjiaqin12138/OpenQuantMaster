@@ -243,8 +243,10 @@ class PipelineRunner:
         artifact_dir = self._config.paths.artifacts / str(run_id) / stage_name
         artifact_dir.mkdir(parents=True, exist_ok=True)
         dest = artifact_dir / artifact.name
-        # Artifact content is not present in M1 ArtifactRef; create a placeholder file
-        dest.write_text(f"# artifact {artifact.name}\n", encoding="utf-8")
+        if artifact.content is not None:
+            dest.write_text(artifact.content, encoding="utf-8")
+        elif not dest.exists():
+            dest.write_text(f"# artifact {artifact.name}\n", encoding="utf-8")
         sha256 = hashlib.sha256(dest.read_bytes()).hexdigest()
         relative_path = str(dest.relative_to(self._config.paths.artifacts))
         return await self._store.create_artifact_ref(

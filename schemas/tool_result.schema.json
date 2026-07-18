@@ -17,6 +17,18 @@
         "sha256": {
           "title": "Sha256",
           "type": "string"
+        },
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
         }
       },
       "required": [
