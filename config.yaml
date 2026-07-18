@@ -15,3 +15,18 @@ event_bus:
 logging:
   level: INFO
   format: json
+
+market_data:
+  crypto:
+    default_exchange: binance
+    sandbox: false
+    exchange_keys: {}
+  equities:
+    tushare_token: ""
+    yfinance_timeout: 30
+
+vibe_trading:
+  mode: cli
+  cli_path: vibe-trading
+  http_url: http://localhost:8000
+  mcp_url: stdio

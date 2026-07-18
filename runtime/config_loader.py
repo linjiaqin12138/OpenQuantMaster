@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +28,29 @@ class LoggingConfig(BaseModel):
     format: Literal["json", "console"] = "json"
 
 
+class CryptoMarketDataConfig(BaseModel):
+    default_exchange: str = "binance"
+    sandbox: bool = False
+    exchange_keys: dict[str, dict[str, str]] = Field(default_factory=dict)
+
+
+class EquitiesMarketDataConfig(BaseModel):
+    tushare_token: str = ""
+    yfinance_timeout: int = 30
+
+
+class MarketDataConfig(BaseModel):
+    crypto: CryptoMarketDataConfig = Field(default_factory=CryptoMarketDataConfig)
+    equities: EquitiesMarketDataConfig = Field(default_factory=EquitiesMarketDataConfig)
+
+
+class VibeTradingConfig(BaseModel):
+    mode: Literal["cli", "mcp", "http"] = "cli"
+    cli_path: str = "vibe-trading"
+    http_url: str = "http://localhost:8000"
+    mcp_url: str = "stdio"
+
+
 class RuntimeConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="QUANT_AGENT_",
@@ -41,6 +64,8 @@ class RuntimeConfig(BaseSettings):
     scheduler: SchedulerConfig = SchedulerConfig()
     event_bus: EventBusConfig = EventBusConfig()
     logging: LoggingConfig = LoggingConfig()
+    market_data: MarketDataConfig = MarketDataConfig()
+    vibe_trading: VibeTradingConfig = VibeTradingConfig()
     config_path: Path | None = None
 
     @property
