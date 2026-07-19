@@ -9,7 +9,7 @@ stages:
   - name: fetch_ohlcv
     tool: ohlcv_tool
     inputs:
-      symbol: "SOLUSDT.P"
+      symbol: "SOLUSDT"
       market: "crypto"
       interval: "15m"
 

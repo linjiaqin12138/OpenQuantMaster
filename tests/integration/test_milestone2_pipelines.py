@@ -1,5 +1,6 @@
 import json
 from typing import Any, ClassVar
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -176,13 +177,18 @@ async def test_crypto_signal_fired_pipeline(m2_setup, tmp_path):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_backtest_demo_pipeline(m2_setup, tmp_path):
+async def test_backtest_demo_pipeline(m2_setup, tmp_path, monkeypatch):
     run_dir = tmp_path / "vibe_backtest_123"
     run_dir.mkdir()
-    (run_dir / "equity.csv").write_text("date,equity\n2026-01-01,10000\n")
-    (run_dir / "trades.csv").write_text("id,symbol,side\n1,SOLUSDT.P,buy\n")
-    (run_dir / "metrics.csv").write_text("metric,value\nsharpe,1.5\n")
-    (run_dir / "run_card.json").write_text(
+    (run_dir / "config.json").write_text(json.dumps({"codes": ["SOLUSDT.P"]}))
+    (run_dir / "code").mkdir()
+    (run_dir / "code" / "signal_engine.py").write_text("# signal engine")
+    artifacts_dir = run_dir / "artifacts"
+    artifacts_dir.mkdir()
+    (artifacts_dir / "equity.csv").write_text("date,equity\n2026-01-01,10000\n")
+    (artifacts_dir / "trades.csv").write_text("id,symbol,side\n1,SOLUSDT.P,buy\n")
+    (artifacts_dir / "metrics.csv").write_text("metric,value\nsharpe,1.5\n")
+    (artifacts_dir / "run_card.json").write_text(
         json.dumps(
             {
                 "sharpe": 1.5,
@@ -190,6 +196,17 @@ async def test_backtest_demo_pipeline(m2_setup, tmp_path):
                 "total_return_pct": 0.12,
             }
         )
+    )
+
+    async def fake_create_subprocess_exec(*cmd, **kwargs):
+        fake_proc = AsyncMock()
+        fake_proc.returncode = 0
+        fake_proc.communicate.return_value = (b"", b"")
+        return fake_proc
+
+    monkeypatch.setattr(
+        "tools.research.backtest_tool.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
     )
 
     pipelines_dir = m2_setup.runner._pipelines_dir

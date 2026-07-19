@@ -89,11 +89,25 @@ def _load_env_overrides(prefix: str = "QUANT_AGENT_") -> dict[str, Any]:
     return overrides
 
 
+DEFAULT_CONFIG_PATH: Path = Path("config.yaml")
+
+
 def load_config(config_path: Path | str | None = None, **overrides: Any) -> RuntimeConfig:
-    """Load runtime configuration from YAML, environment, and CLI overrides."""
+    """Load runtime configuration from YAML, environment, and CLI overrides.
+
+    If ``config_path`` is not provided, falls back to ``config.yaml`` in the
+    current working directory when it exists. This lets ``quantmaster-run`` and
+    ``quantmaster-daemon`` pick up the project config without requiring
+    ``--config ./config.yaml`` on every invocation.
+    """
     kwargs: dict[str, Any] = {}
+    path: Path | None = None
     if config_path is not None:
         path = Path(config_path)
+    elif DEFAULT_CONFIG_PATH.exists():
+        path = DEFAULT_CONFIG_PATH
+
+    if path is not None:
         if not path.exists():
             raise FileNotFoundError(f"Configuration file not found: {path}")
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}

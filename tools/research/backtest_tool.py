@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import sys
 import tempfile
 import uuid
 from pathlib import Path
@@ -61,6 +62,11 @@ class BacktestTool(BaseTool):
             return ToolResult(success=False, error=f"Unsupported vibe_trading mode: {mode}")
 
         artifacts = await self._collect_artifacts(output_dir)
+        if not artifacts:
+            return ToolResult(
+                success=False,
+                error=f"No artifacts found in backtest output dir: {output_dir}",
+            )
 
         metrics = await self._read_run_card(output_dir)
         output = self.output_model(
@@ -78,26 +84,22 @@ class BacktestTool(BaseTool):
     async def _call_cli(self, cfg: Any, inputs: dict[str, Any], run_id: str) -> Path:
         run_dir = inputs.get("run_dir")
         if run_dir:
-            return Path(run_dir)
+            return await self._call_runner(run_dir)
 
         description = inputs.get("strategy_description")
         if not description:
             raise ValueError("strategy_description or run_dir is required")
 
+        symbols = ",".join(inputs["symbols"])
+        prompt = f"Backtest {description} on {symbols} ({inputs['market']})"
+        if inputs.get("start"):
+            prompt += f" from {inputs['start']}"
+        if inputs.get("end"):
+            prompt += f" to {inputs['end']}"
+
         tmpdir = Path(tempfile.gettempdir()) / f"vibe_backtest_{run_id}"
         tmpdir.mkdir(parents=True, exist_ok=True)
-        cmd = [
-            cfg.vibe_trading.cli_path,
-            "run",
-            "--description", description,
-            "--market", inputs["market"],
-            "--symbols", ",".join(inputs["symbols"]),
-            "--output-dir", str(tmpdir),
-        ]
-        if inputs.get("start"):
-            cmd.extend(["--start", inputs["start"]])
-        if inputs.get("end"):
-            cmd.extend(["--end", inputs["end"]])
+        cmd = [cfg.vibe_trading.cli_path, "run", "-p", prompt, "--json"]
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -107,11 +109,32 @@ class BacktestTool(BaseTool):
         )
         stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
+            raise RuntimeError(f"Vibe-Trading CLI failed: {stderr.decode('utf-8')}")
+
+        try:
+            summary = json.loads(stdout.decode("utf-8"))
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Could not parse Vibe-Trading JSON output: {exc}") from exc
+
+        run_dir_path = summary.get("run_dir")
+        if not run_dir_path:
+            raise RuntimeError("Vibe-Trading CLI did not return a run_dir")
+        return Path(run_dir_path) / "artifacts"
+
+    async def _call_runner(self, run_dir: str) -> Path:
+        run_path = Path(run_dir)
+        cmd = [sys.executable, "-m", "backtest.runner", str(run_path)]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
             raise RuntimeError(
-                f"Vibe-Trading CLI failed: {stderr.decode('utf-8')}\n"
-                f"stdout: {stdout.decode('utf-8')}"
+                f"Vibe-Trading backtest runner failed: {stderr.decode('utf-8')}"
             )
-        return tmpdir
+        return run_path / "artifacts"
 
     async def _call_http(self, cfg: Any, inputs: dict[str, Any], run_id: str) -> Path:
         raise NotImplementedError("HTTP Vibe-Trading mode is not implemented in Milestone 2")
