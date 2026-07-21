@@ -3,11 +3,12 @@
 ## Document Control
 
 - **Date**: 2026-07-19
-- **Status**: Draft for review
+- **Status**: Approved
+- **Approved**: 2026-07-20
 - **Author**: Claude Code (collaborative session with project owner)
 - **Related documents**:
-  - `docs/superpowers/specs/2026-07-19-agent-integration-design.md` (full Agent integration design — preserved)
-  - `docs/superpowers/specs/2026-07-12-agent-trading-system-design.md` (system design)
+  - `../quant/docs/superpowers/specs/2026-07-19-agent-integration-design.md` (full Agent integration design — preserved)
+  - `../quant/docs/superpowers/specs/2026-07-12-agent-trading-system-design.md` (system design)
 - **Decision**: Build a **minimal end-to-end demo** that proves an external Agent CLI can be invoked as a pipeline stage, read a previous stage's artifact, produce a new artifact, and trigger a PushPlus notification in the next stage.
 
 ---

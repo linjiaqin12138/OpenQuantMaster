@@ -51,6 +51,48 @@ class VibeTradingConfig(BaseModel):
     mcp_url: str = "stdio"
 
 
+class AgentConfig(BaseModel):
+    default_cli: str = "claude"
+    custom_command: str = ""
+    timeout_sec: int = 120
+    max_iterations: int = 10  # scaffolding for full design; not enforced in demo
+    tool_callback: Literal["cli", "mcp", "http"] = "cli"
+    headless_args: list[str] = Field(default_factory=lambda: ["--allow-external"])
+
+
+class McpConfig(BaseModel):
+    enabled: bool = False
+    transport: Literal["stdio", "sse"] = "stdio"
+    port: int = 8711
+
+
+class PushplusConfig(BaseModel):
+    enabled: bool = True
+    token: str = ""
+
+
+class TelegramConfig(BaseModel):
+    enabled: bool = False
+    bot_token: str = ""
+    chat_id: str = ""
+
+
+class EmailConfig(BaseModel):
+    enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 465
+    username: str = ""
+    password: str = ""
+    from_addr: str = ""
+    to_addrs: list[str] = Field(default_factory=list)
+
+
+class NotifierConfig(BaseModel):
+    telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    pushplus: PushplusConfig = Field(default_factory=PushplusConfig)
+    email: EmailConfig = Field(default_factory=EmailConfig)
+
+
 class RuntimeConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="QUANT_AGENT_",
@@ -66,6 +108,9 @@ class RuntimeConfig(BaseSettings):
     logging: LoggingConfig = LoggingConfig()
     market_data: MarketDataConfig = MarketDataConfig()
     vibe_trading: VibeTradingConfig = VibeTradingConfig()
+    agent: AgentConfig = Field(default_factory=AgentConfig)
+    mcp: McpConfig = Field(default_factory=McpConfig)
+    notifier: NotifierConfig = Field(default_factory=NotifierConfig)
     config_path: Path | None = None
 
     @property

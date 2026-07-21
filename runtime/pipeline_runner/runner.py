@@ -13,8 +13,10 @@ import structlog
 import yaml
 from pydantic import ValidationError
 
+from runtime.agent_gateway.agent_driver import AgentDriver
 from runtime.config_loader import RuntimeConfig
 from runtime.event_bus.memory_bus import MemoryEventBus
+from runtime.notifier.composite import CompositeNotifier
 from runtime.state_store.database import StateStore
 from runtime.state_store.models import ArtifactRef as ArtifactRefModel, MarketType, RunStatus, SignalSide
 from tools.base.tool_registry import ToolNotFoundError, ToolRegistry
@@ -37,11 +39,15 @@ class PipelineRunner:
         store: StateStore,
         bus: MemoryEventBus,
         registry: ToolRegistry,
+        agent_driver: AgentDriver | None = None,
+        notifier: CompositeNotifier | None = None,
     ) -> None:
         self._config = config
         self._store = store
         self._bus = bus
         self._registry = registry
+        self._agent_driver = agent_driver
+        self._notifier = notifier
         self._pipelines_dir = Path("pipelines")
         self._schema = self._load_schema()
         self._checkpoint = CheckpointWriter(store)
@@ -146,6 +152,8 @@ class PipelineRunner:
 
         try:
             tool = self._registry.get(tool_name)
+            if "pipeline_run_id" in tool.input_model.model_fields:
+                resolved_inputs["pipeline_run_id"] = str(run_id)
             tool.input_model(**resolved_inputs)
             result = await tool.execute(resolved_inputs)
             if not result.success:

@@ -30,3 +30,34 @@ vibe_trading:
   cli_path: vibe-trading
   http_url: http://localhost:8000
   mcp_url: stdio
+
+agent:
+  default_cli: "claude"
+  custom_command: ".venv/bin/python scripts/agent_demo_cli.py"
+  timeout_sec: 120
+  max_iterations: 10
+  tool_callback: "cli"
+  headless_args:
+    - "--allow-external"
+
+mcp:
+  enabled: false
+  transport: "stdio"
+  port: 8711
+
+notifier:
+  telegram:
+    enabled: false
+    bot_token: ""
+    chat_id: ""
+  pushplus:
+    enabled: true
+    token: ""
+  email:
+    enabled: false
+    smtp_host: ""
+    smtp_port: 465
+    username: ""
+    password: ""
+    from_addr: ""
+    to_addrs: []
