@@ -110,12 +110,21 @@ OpenQuantMaster/
 
 (`read-memory` / `write-memory` skills are deferred — see §1.2.)
 
-### `CLAUDE.md` / `AGENTS.md` content (durable contract only)
+### `CLAUDE.md` / `AGENTS.md` content (minimal, session-agnostic)
 
-- Identity: "You are an OpenQuantMaster trading-analysis Agent."
+These files load in **every** session in the project — including a human's interactive `claude` chat — so they must contain only what is true for all sessions:
+
+- Identity: "This project is OpenQuantMaster, a quant trading pipeline runtime."
 - Tool entry point: `python -m runtime.cli tool <tool_name> --inputs '<json>'`.
-- Output contract: write the final report to `$OQM_OUTPUT_DIR/report.md`, ending with `<!-- summary: <one line> -->`.
-- Constraints: never execute trades; only call registered tools.
+
+Nothing else. Stage-specific rules do not belong here.
+
+### Where stage-specific rules live
+
+| Rule | Location | Why |
+|------|----------|-----|
+| Output contract (`$OQM_OUTPUT_DIR/report.md` + `<!-- summary: -->`) | Injected by the adapter at call time (system-prompt flag when the CLI supports it, e.g. `claude --append-system-prompt`; always also restated in the prompt) | Only applies to headless stage invocations |
+| Behavioral constraints (e.g. "never execute trades") | Inside the relevant skill (`skills/core/*.md`) | Constraints are per-workflow, not global; a future trading pipeline may legitimately allow trades |
 
 Business instructions live in skills, not here.
 
@@ -136,13 +145,15 @@ cd <project root>
 OQM_RUN_ID=<run_id> \
 OQM_OUTPUT_DIR=artifacts/<run_id>/agent_analyze \
 claude -p "加载 skill 'agent_demo'，分析 artifacts/<run_id>/generate_data/demo_data.json，并把最终报告写入 $OQM_OUTPUT_DIR/report.md。" \
-  --allowed-tools "Read,Write,Edit,Bash,Skill"
+  --allowed-tools "Read,Write,Edit,Bash,Skill" \
+  --append-system-prompt "You are running as a stage in an OpenQuantMaster pipeline. Write your final report to \$OQM_OUTPUT_DIR/report.md and end it with a line: <!-- summary: <one-sentence summary> -->."
 ```
 
 Prompt rules:
 
 - Contains **only**: skill name, input artifact path, output dir (via `$OQM_OUTPUT_DIR`), and the stage's `task_description`.
 - Never embeds skill content or artifact content — the Agent reads them with its own tools.
+- The output contract is additionally injected via the CLI's system-prompt mechanism when available (`--append-system-prompt` for Claude Code; adapters for CLIs without such a flag rely on the prompt text alone).
 
 Adapter-specific argv:
 
