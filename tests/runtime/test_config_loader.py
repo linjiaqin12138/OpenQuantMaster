@@ -60,3 +60,34 @@ def test_load_config_ignores_missing_default_config(tmp_path, monkeypatch):
     cfg = load_config()
     assert cfg.app_name == "OpenQuantMaster"
     assert cfg.config_path is None
+
+
+@pytest.mark.unit
+def test_agent_config_defaults():
+    from runtime.config_loader import AgentConfig
+
+    config = AgentConfig()
+    assert config.adapter == "claude"
+    assert config.default_cli == "claude"
+    assert config.timeout_sec == 120
+    assert config.headless_args == []
+    assert config.generic.prompt_flag == "-p"
+
+
+@pytest.mark.unit
+def test_agent_config_generic_adapter():
+    from runtime.config_loader import AgentConfig
+
+    config = AgentConfig(adapter="generic", default_cli="mycli", generic={"prompt_flag": "--prompt"})
+    assert config.adapter == "generic"
+    assert config.generic.prompt_flag == "--prompt"
+
+
+@pytest.mark.unit
+def test_agent_config_rejects_removed_fields():
+    from runtime.config_loader import AgentConfig
+
+    # pydantic v2 default extra="ignore" (this file's convention), so removed
+    # fields are silently ignored; assert they no longer exist on the model.
+    assert not hasattr(AgentConfig(), "custom_command")
+    assert not hasattr(AgentConfig(custom_command="echo hi"), "custom_command")

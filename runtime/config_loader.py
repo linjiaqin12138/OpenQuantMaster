@@ -51,13 +51,16 @@ class VibeTradingConfig(BaseModel):
     mcp_url: str = "stdio"
 
 
+class GenericAgentConfig(BaseModel):
+    prompt_flag: str = "-p"
+
+
 class AgentConfig(BaseModel):
+    adapter: Literal["claude", "codex", "kimi", "generic"] = "claude"
     default_cli: str = "claude"
-    custom_command: str = ""
     timeout_sec: int = 120
-    max_iterations: int = 10  # scaffolding for full design; not enforced in demo
-    tool_callback: Literal["cli", "mcp", "http"] = "cli"
-    headless_args: list[str] = Field(default_factory=lambda: ["--allow-external"])
+    headless_args: list[str] = Field(default_factory=list)
+    generic: GenericAgentConfig = Field(default_factory=GenericAgentConfig)
 
 
 class McpConfig(BaseModel):

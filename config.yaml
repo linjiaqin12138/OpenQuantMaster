@@ -32,13 +32,10 @@ vibe_trading:
   mcp_url: stdio
 
 agent:
+  adapter: "claude"
   default_cli: "claude"
-  custom_command: ".venv/bin/python scripts/agent_demo_cli.py"
-  timeout_sec: 120
-  max_iterations: 10
-  tool_callback: "cli"
-  headless_args:
-    - "--allow-external"
+  timeout_sec: 300
+  headless_args: []
 
 mcp:
   enabled: false
