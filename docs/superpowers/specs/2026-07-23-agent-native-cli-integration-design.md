@@ -89,8 +89,9 @@ Command:
 python -m runtime.cli init-workspace --agent claude   # .claude/ + CLAUDE.md
 python -m runtime.cli init-workspace --agent codex    # .agents/ + AGENTS.md
 python -m runtime.cli init-workspace --agent kimi     # .agents/ + AGENTS.md (until kimi has a native dir)
-python -m runtime.cli init-workspace --agent all      # default: generate every known target
 ```
+
+`--agent` is required and repeatable (e.g. `--agent claude --agent codex`); there is no `all` shortcut — targets are always chosen explicitly.
 
 ### Generated layout
 
@@ -174,7 +175,7 @@ Environment injected into the subprocess: `OQM_RUN_ID`, `OQM_OUTPUT_DIR`, plus t
 - Summary extraction (unchanged from demo):
   1. `<!-- summary: ... -->` marker, else
   2. first non-empty line.
-- Fallback: if `report.md` is missing but stdout is non-empty, treat stdout as the report content (still success).
+- Fallback: if `report.md` is missing but stdout is non-empty, treat stdout as the report content (still success) and write it to `report.md` so downstream stages can read it. Verified for Claude Code (2026-07-23): `claude -p "<prompt>"` in one-shot mode prints only the final response text to stdout (default `--output-format text`). Adapters must therefore use the CLI's plain-text output mode, not a JSON/JSONL mode.
 - Missing report **and** empty stdout → `success=False`.
 
 | Scenario | Behavior |
