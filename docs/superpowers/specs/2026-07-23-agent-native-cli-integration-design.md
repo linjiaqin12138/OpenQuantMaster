@@ -28,10 +28,11 @@ An Agent stage in a pipeline should:
 
 - **Adapter layer** in `runtime/agent_gateway/adapters/` — one adapter per CLI (`claude`, `codex`, `kimi`, `generic`).
 - **`init-workspace` CLI command** — generates workspace files per target CLI (Claude Code, Codex, or all).
-- **Workspace skill set** — `oqm-tool`, `read-memory`, `write-memory`, plus business skills synced from `skills/core/`.
-- **Memory tools** — `read_memory_tool` / `write_memory_tool` with structured lessons.
+- **Workspace skill set** — `oqm-tool`, plus business skills synced from `skills/core/`.
 - **`CliBackend` refactor** — delegates argv composition to adapters; keeps subprocess/timeout/output handling.
 - **Pipeline contract unchanged** — `agent_tool` input/output schema stays as in the demo design.
+
+**Deferred (explicitly out of this implementation round):** memory tools (`read_memory_tool` / `write_memory_tool`), the `read-memory` / `write-memory` skills, and the structured lesson store (§6). The design for them is kept below as the agreed target; implementation happens in a later round.
 
 ### 1.3 Non-goals
 
@@ -101,22 +102,19 @@ OpenQuantMaster/
 │   ├── settings.json               # 权限：允许 Bash(python -m runtime.cli tool *) 等
 │   └── skills/
 │       ├── oqm-tool/SKILL.md
-│       ├── read-memory/SKILL.md
-│       ├── write-memory/SKILL.md
 │       └── <business skills synced from skills/core/>
 └── .agents/
     └── skills/                     # 同一份 skill，供 Codex/opencode 系 CLI 发现
-        ├── oqm-tool/SKILL.md
-        ├── read-memory/SKILL.md
-        └── write-memory/SKILL.md
+        └── oqm-tool/SKILL.md
 ```
+
+(`read-memory` / `write-memory` skills are deferred — see §1.2.)
 
 ### `CLAUDE.md` / `AGENTS.md` content (durable contract only)
 
 - Identity: "You are an OpenQuantMaster trading-analysis Agent."
 - Tool entry point: `python -m runtime.cli tool <tool_name> --inputs '<json>'`.
 - Output contract: write the final report to `$OQM_OUTPUT_DIR/report.md`, ending with `<!-- summary: <one line> -->`.
-- Memory: read relevant lessons before analysis via `/read-memory` (or the tool directly); write a lesson after via `/write-memory`.
 - Constraints: never execute trades; only call registered tools.
 
 Business instructions live in skills, not here.
@@ -177,7 +175,9 @@ Environment injected into the subprocess: `OQM_RUN_ID`, `OQM_OUTPUT_DIR`, plus t
 
 ---
 
-## 6. Memory (Structured Lessons)
+## 6. Memory (Structured Lessons) — DEFERRED
+
+> **Not implemented in this round** (owner decision, 2026-07-23). This section records the agreed target design for a later iteration. The `read-memory` / `write-memory` skills and memory tools must not be referenced by `CLAUDE.md`/`AGENTS.md` templates or skills until this lands.
 
 Lesson schema:
 
@@ -233,23 +233,18 @@ runtime/agent_gateway/adapters/
 runtime/workspace/
 ├── __init__.py
 └── init_workspace.py        # workspace file generation
-tools/memory/
-├── __init__.py
-├── read_memory_tool.py
-└── write_memory_tool.py
 templates/workspace/
 ├── CLAUDE.md.tmpl
 ├── AGENTS.md.tmpl
 ├── settings.json.tmpl
 └── skills/
-    ├── oqm-tool.SKILL.md
-    ├── read-memory.SKILL.md
-    └── write-memory.SKILL.md
+    └── oqm-tool.SKILL.md
 tests/
 ├── runtime/test_adapters.py
-├── runtime/test_init_workspace.py
-└── tools/test_memory_tools.py
+└── runtime/test_init_workspace.py
 ```
+
+> Deferred to the memory round: `tools/memory/`, `templates/workspace/skills/read-memory.SKILL.md`, `templates/workspace/skills/write-memory.SKILL.md`, `tests/tools/test_memory_tools.py`.
 
 ### Modified files
 
@@ -257,7 +252,6 @@ tests/
 - `runtime/agent_gateway/agent_driver.py` — select adapter by `config.agent.adapter`.
 - `runtime/config_loader.py` — new `AgentConfig` shape (adapter, generic.prompt_flag; drop `custom_command`, `tool_callback`).
 - `runtime/cli.py` — add `init-workspace` subcommand.
-- `runtime/bootstrap.py` — register memory tools.
 - `tests/integration/test_agent_demo_pipeline.py` — updated: fake CLI receives a prompt (not flags); asserts report recovery still works.
 - `pyproject.toml` — no new dependencies expected.
 
@@ -274,7 +268,6 @@ tests/
 |------|------|
 | Unit | Each adapter composes correct argv/env/cwd from an `AgentTask` |
 | Unit | `init-workspace` generates the full layout per target; idempotent; `--force` overwrites; settings.json merge |
-| Unit | `read_memory_tool` / `write_memory_tool` round-trip; context filter; limit |
 | Unit | `CliBackend` summary extraction and stdout fallback (fake CLI script) |
 | Integration | `agent_demo` pipeline end-to-end with a fake CLI executable (writes `report.md`), asserting stage success, report artifact, and notify body |
 | Integration (manual/opt-in) | Real `claude -p` run of `agent_demo`, skipped unless `claude` is on PATH |
@@ -286,9 +279,11 @@ No live network calls; PushPlus remains mocked as in the demo.
 ## 10. Migration from the Demo Implementation
 
 1. Land adapters + `CliBackend` refactor behind the new config (`agent.adapter`).
-2. Land `init-workspace` + templates + memory tools.
+2. Land `init-workspace` + templates.
 3. Update `agent_demo` integration test to the prompt contract.
 4. Update `AGENT_GUIDE.md`: document `init-workspace`, workspace layout, and how to add a new CLI adapter.
 5. Remove `scripts/agent_demo_cli.py` and the old flag contract.
+
+Memory tools and skills (§6) land in a follow-up round after this migration is verified.
 
 The demo design (`2026-07-19-agent-integration-demo-design.md`) is superseded in the parts concerning the Agent CLI contract; its pipeline/notifier portions remain valid.
