@@ -6,6 +6,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from runtime.agent_gateway.adapters.base import AdapterCommand, BaseAdapter
+from runtime.agent_gateway.adapters.claude_adapter import ClaudeAdapter
+from runtime.agent_gateway.adapters.codex_adapter import CodexAdapter
+from runtime.agent_gateway.adapters.generic_adapter import GenericAdapter
+from runtime.agent_gateway.adapters.kimi_adapter import KimiAdapter
+from runtime.agent_gateway.agent_driver import AgentDriver
 from runtime.agent_gateway.agent_task import AgentTask
 from runtime.agent_gateway.backends.cli_backend import CliBackend
 from runtime.config_loader import AgentConfig
@@ -140,3 +145,19 @@ async def test_cli_backend_timeout_kills_process(tmp_path):
 
     assert result.success is False
     assert "timed out" in result.error
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("adapter", "expected_cls"),
+    [
+        ("claude", ClaudeAdapter),
+        ("codex", CodexAdapter),
+        ("kimi", KimiAdapter),
+        ("generic", GenericAdapter),
+    ],
+)
+def test_agent_driver_selects_adapter(adapter, expected_cls):
+    driver = AgentDriver(AgentConfig(adapter=adapter))
+    assert isinstance(driver._backend, CliBackend)
+    assert isinstance(driver._backend._adapter, expected_cls)

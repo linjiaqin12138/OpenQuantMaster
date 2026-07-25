@@ -1,25 +1,30 @@
 from __future__ import annotations
 
+from runtime.agent_gateway.adapters.base import BaseAdapter
+from runtime.agent_gateway.adapters.claude_adapter import ClaudeAdapter
+from runtime.agent_gateway.adapters.codex_adapter import CodexAdapter
+from runtime.agent_gateway.adapters.generic_adapter import GenericAdapter
+from runtime.agent_gateway.adapters.kimi_adapter import KimiAdapter
 from runtime.agent_gateway.agent_result import AgentResult
 from runtime.agent_gateway.agent_task import AgentTask
 from runtime.agent_gateway.backends.base import BaseBackend
 from runtime.agent_gateway.backends.cli_backend import CliBackend
-from runtime.agent_gateway.backends.http_backend import HttpBackend
-from runtime.agent_gateway.backends.mcp_backend import McpBackend
 from runtime.config_loader import AgentConfig
+
+_ADAPTERS: dict[str, type[BaseAdapter]] = {
+    "claude": ClaudeAdapter,
+    "codex": CodexAdapter,
+    "kimi": KimiAdapter,
+    "generic": GenericAdapter,
+}
 
 
 class AgentDriver:
     def __init__(self, config: AgentConfig) -> None:
-        self._config = config
-        if config.tool_callback == "cli":
-            self._backend: BaseBackend = CliBackend(config)
-        elif config.tool_callback == "mcp":
-            self._backend = McpBackend(config)
-        elif config.tool_callback == "http":
-            self._backend = HttpBackend(config)
-        else:
-            raise ValueError(f"Unknown tool_callback: {config.tool_callback}")
+        adapter_cls = _ADAPTERS.get(config.adapter)
+        if adapter_cls is None:
+            raise ValueError(f"Unknown agent adapter: {config.adapter}")
+        self._backend: BaseBackend = CliBackend(config, adapter_cls(config))
 
     async def run(self, task: AgentTask) -> AgentResult:
         return await self._backend.run(task)
