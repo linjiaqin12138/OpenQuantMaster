@@ -1,0 +1,14 @@
+# OpenQuantMaster
+
+This project is OpenQuantMaster, a quant trading pipeline runtime (Python).
+
+## Calling pipeline tools
+
+Invoke registered tools through the runtime CLI:
+
+```bash
+python -m runtime.cli tool <tool_name> --inputs '<json>'
+```
+
+The command prints a JSON `ToolResult` to stdout; check `success` before using `data`.
+See the `oqm-tool` skill for details and examples.
