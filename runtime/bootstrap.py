@@ -44,7 +44,7 @@ async def bootstrap(config_path: Path | str | None = None, package: ModuleType |
         raise StartupError(f"Failed to load configuration: {exc}") from exc
 
     # Default the agent subprocess workdir to the config file's directory so
-    # the CLI discovers .claude//CLAUDE.md even when the daemon runs elsewhere.
+    # the CLI discovers .claude/ or AGENTS.md even when the daemon runs elsewhere.
     if not config.agent.workdir and config.config_path is not None:
         config.agent.workdir = str(config.config_path.resolve().parent)
 
