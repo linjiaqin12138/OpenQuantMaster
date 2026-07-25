@@ -24,12 +24,13 @@ class CliBackend(BaseBackend):
 
         command = self._adapter.compose_command(task)
         env = {**os.environ, **command.env}
+        cwd = command.cwd or (self._config.workdir or None)
 
         proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 *command.argv,
-                cwd=command.cwd,
+                cwd=cwd,
                 env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -53,8 +54,8 @@ class CliBackend(BaseBackend):
 
         if proc.returncode != 0:
             error_msg = (
-                stderr.decode().strip()
-                or stdout.decode().strip()
+                stderr.decode(encoding="utf-8", errors="replace").strip()
+                or stdout.decode(encoding="utf-8", errors="replace").strip()
                 or f"Agent process exited with code {proc.returncode}"
             )
             return AgentResult(success=False, error=error_msg)

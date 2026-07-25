@@ -43,6 +43,11 @@ async def bootstrap(config_path: Path | str | None = None, package: ModuleType |
     except Exception as exc:
         raise StartupError(f"Failed to load configuration: {exc}") from exc
 
+    # Default the agent subprocess workdir to the config file's directory so
+    # the CLI discovers .claude//CLAUDE.md even when the daemon runs elsewhere.
+    if not config.agent.workdir and config.config_path is not None:
+        config.agent.workdir = str(config.config_path.resolve().parent)
+
     try:
         store = StateStore(database_url=config.database_url, artifacts_path=config.paths.artifacts)
         await store.init()

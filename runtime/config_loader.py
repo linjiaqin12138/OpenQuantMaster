@@ -59,6 +59,7 @@ class AgentConfig(BaseModel):
     adapter: Literal["claude", "codex", "kimi", "generic"] = "claude"
     default_cli: str = "claude"
     timeout_sec: int = 120
+    workdir: str = ""
     headless_args: list[str] = Field(default_factory=list)
     generic: GenericAgentConfig = Field(default_factory=GenericAgentConfig)
 

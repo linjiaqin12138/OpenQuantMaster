@@ -16,7 +16,7 @@ from tools.base.tool_result import ArtifactRef, ToolResult
 class AgentToolInput(BaseModel):
     skill: str
     task_description: str
-    timeout_sec: int = Field(default=120, ge=1)
+    timeout_sec: int | None = Field(default=None, ge=1)
     pipeline_run_id: str | None = None
 
 
@@ -55,7 +55,7 @@ class AgentTool(BaseTool):
             previous_artifact_path=previous_artifact_path,
             output_dir=output_dir,
             pipeline_run_id=run_id,
-            timeout_sec=inputs.get("timeout_sec", 120),
+            timeout_sec=inputs.get("timeout_sec") or self._agent_driver.default_timeout_sec,
         )
 
         result = await self._agent_driver.run(task)

@@ -17,13 +17,15 @@ from runtime.config_loader import AgentConfig
 
 
 class FakeAdapter(BaseAdapter):
-    def __init__(self, argv: list[str]) -> None:
+    def __init__(self, argv: list[str], cwd: str | None = None) -> None:
         self._argv = argv
+        self._cwd = cwd
 
     def compose_command(self, task: AgentTask) -> AdapterCommand:
         return AdapterCommand(
             argv=self._argv,
             env={"OQM_RUN_ID": task.pipeline_run_id, "OQM_OUTPUT_DIR": task.output_dir},
+            cwd=self._cwd,
         )
 
 
@@ -132,6 +134,75 @@ async def test_cli_backend_nonzero_exit_returns_stderr(tmp_path):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_cli_backend_uses_config_workdir_when_adapter_cwd_is_none(tmp_path):
+    config = AgentConfig(workdir="/some/root")
+    backend = CliBackend(config, FakeAdapter(["echo", "hello"], cwd=None))
+    task = _task(tmp_path)
+
+    (tmp_path / "output").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "output" / "report.md").write_text("<!-- summary: ok -->")
+
+    captured = {}
+
+    async def fake_create_subprocess_exec(*cmd, **kwargs):
+        captured["cwd"] = kwargs.get("cwd")
+        proc = AsyncMock()
+        proc.returncode = 0
+        proc.communicate.return_value = (b"", b"")
+        return proc
+
+    with patch.object(asyncio, "create_subprocess_exec", side_effect=fake_create_subprocess_exec):
+        result = await backend.run(task)
+
+    assert result.success is True
+    assert captured["cwd"] == "/some/root"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cli_backend_adapter_cwd_wins_over_config_workdir(tmp_path):
+    config = AgentConfig(workdir="/some/root")
+    backend = CliBackend(config, FakeAdapter(["echo", "hello"], cwd="/adapter/root"))
+    task = _task(tmp_path)
+
+    (tmp_path / "output").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "output" / "report.md").write_text("<!-- summary: ok -->")
+
+    captured = {}
+
+    async def fake_create_subprocess_exec(*cmd, **kwargs):
+        captured["cwd"] = kwargs.get("cwd")
+        proc = AsyncMock()
+        proc.returncode = 0
+        proc.communicate.return_value = (b"", b"")
+        return proc
+
+    with patch.object(asyncio, "create_subprocess_exec", side_effect=fake_create_subprocess_exec):
+        result = await backend.run(task)
+
+    assert result.success is True
+    assert captured["cwd"] == "/adapter/root"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cli_backend_nonzero_exit_tolerates_non_utf8_stderr(tmp_path):
+    config = AgentConfig()
+    backend = CliBackend(
+        config,
+        FakeAdapter(
+            [sys.executable, "-c", "import sys; sys.stderr.buffer.write(b'\\xff\\xfe bad'); sys.exit(3)"]
+        ),
+    )
+
+    result = await backend.run(_task(tmp_path))
+
+    assert result.success is False
+    assert "bad" in result.error
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_cli_backend_timeout_kills_process(tmp_path):
     config = AgentConfig()
     backend = CliBackend(
@@ -161,3 +232,9 @@ def test_agent_driver_selects_adapter(adapter, expected_cls):
     driver = AgentDriver(AgentConfig(adapter=adapter))
     assert isinstance(driver._backend, CliBackend)
     assert isinstance(driver._backend._adapter, expected_cls)
+
+
+@pytest.mark.unit
+def test_agent_driver_exposes_default_timeout_sec():
+    driver = AgentDriver(AgentConfig(timeout_sec=300))
+    assert driver.default_timeout_sec == 300

@@ -31,7 +31,7 @@ logging:
 """
     )
     result = await bootstrap(config_path, package=tools)
-    yield result
+    yield result, config_path
     await result.scheduler.stop()
     await result.store.close()
     await result.bus.stop()
@@ -40,12 +40,20 @@ logging:
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_bootstrap_wires_all_subsystems(boot):
-    assert boot.config.environment == "testing"
-    assert boot.store is not None
-    assert boot.bus is not None
-    assert "echo_tool" in boot.registry.list_tools()
-    assert boot.scheduler is not None
-    assert boot.runner is not None
+    result, _config_path = boot
+    assert result.config.environment == "testing"
+    assert result.store is not None
+    assert result.bus is not None
+    assert "echo_tool" in result.registry.list_tools()
+    assert result.scheduler is not None
+    assert result.runner is not None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_bootstrap_defaults_agent_workdir_to_config_dir(boot):
+    result, config_path = boot
+    assert result.config.agent.workdir == str(config_path.resolve().parent)
 
 
 @pytest.mark.unit
@@ -104,8 +112,8 @@ logging:
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_scheduler_run_now_triggers_runner(boot):
-
-    run_id = await boot.scheduler.run_now("hello_pipeline")
+    result, _config_path = boot
+    run_id = await result.scheduler.run_now("hello_pipeline")
     assert run_id is not None
 
 

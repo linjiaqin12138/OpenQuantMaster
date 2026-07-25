@@ -24,7 +24,12 @@ class AgentDriver:
         adapter_cls = _ADAPTERS.get(config.adapter)
         if adapter_cls is None:
             raise ValueError(f"Unknown agent adapter: {config.adapter}")
+        self._config = config
         self._backend: BaseBackend = CliBackend(config, adapter_cls(config))
+
+    @property
+    def default_timeout_sec(self) -> int:
+        return self._config.timeout_sec
 
     async def run(self, task: AgentTask) -> AgentResult:
         return await self._backend.run(task)

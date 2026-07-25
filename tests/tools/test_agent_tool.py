@@ -52,3 +52,64 @@ async def test_agent_tool_propagates_success_result(tmp_path):
     assert task.pipeline_run_id == run_id
     assert Path(task.previous_artifact_path) == tmp_path / run_id / "generate_data" / "demo_data.json"
     assert Path(task.output_dir) == tmp_path / run_id / "agent_analyze"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_agent_tool_uses_driver_default_timeout_when_omitted(tmp_path):
+    mock_driver = AsyncMock(spec=AgentDriver)
+    mock_driver.default_timeout_sec = 300
+    mock_driver.run.return_value = AgentResult(
+        success=True,
+        report_artifact="report.md",
+        summary="done",
+    )
+
+    tool = AgentTool(agent_driver=mock_driver, artifacts_path=tmp_path)
+    run_id = "run-timeout-default"
+    report_dir = tmp_path / run_id / "agent_analyze"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_dir.joinpath("report.md").write_text("Report\n<!-- summary: done -->\n")
+
+    result = await tool.execute(
+        {
+            "skill": "core/agent_demo",
+            "task_description": "Analyze data.",
+            "pipeline_run_id": run_id,
+        }
+    )
+
+    assert result.success is True
+    task = mock_driver.run.call_args.args[0]
+    assert task.timeout_sec == 300
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_agent_tool_explicit_timeout_wins_over_config_default(tmp_path):
+    mock_driver = AsyncMock(spec=AgentDriver)
+    mock_driver.default_timeout_sec = 300
+    mock_driver.run.return_value = AgentResult(
+        success=True,
+        report_artifact="report.md",
+        summary="done",
+    )
+
+    tool = AgentTool(agent_driver=mock_driver, artifacts_path=tmp_path)
+    run_id = "run-timeout-explicit"
+    report_dir = tmp_path / run_id / "agent_analyze"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_dir.joinpath("report.md").write_text("Report\n<!-- summary: done -->\n")
+
+    result = await tool.execute(
+        {
+            "skill": "core/agent_demo",
+            "task_description": "Analyze data.",
+            "pipeline_run_id": run_id,
+            "timeout_sec": 42,
+        }
+    )
+
+    assert result.success is True
+    task = mock_driver.run.call_args.args[0]
+    assert task.timeout_sec == 42

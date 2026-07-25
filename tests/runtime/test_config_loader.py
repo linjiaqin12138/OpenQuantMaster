@@ -70,6 +70,7 @@ def test_agent_config_defaults():
     assert config.adapter == "claude"
     assert config.default_cli == "claude"
     assert config.timeout_sec == 120
+    assert config.workdir == ""
     assert config.headless_args == []
     assert config.generic.prompt_flag == "-p"
 

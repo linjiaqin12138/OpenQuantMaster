@@ -35,6 +35,7 @@ agent:
   adapter: "claude"
   default_cli: "claude"
   timeout_sec: 300
+  workdir: ""  # defaults to the config file's directory at bootstrap
   headless_args: []
 
 mcp:
