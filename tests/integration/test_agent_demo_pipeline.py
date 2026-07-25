@@ -26,20 +26,22 @@ async def agent_demo_setup(tmp_path, monkeypatch):
             """
             import argparse
             import json
+            import os
             import pathlib
+            import re
 
             parser = argparse.ArgumentParser()
-            parser.add_argument("--skill")
-            parser.add_argument("--artifact")
-            parser.add_argument("--output-dir")
-            parser.add_argument("--task")
-            args = parser.parse_args()
+            parser.add_argument("-p", dest="prompt", default="")
+            args, _unknown = parser.parse_known_args()
 
-            artifact_path = pathlib.Path(args.artifact)
-            data = json.loads(artifact_path.read_text(encoding="utf-8"))
-
-            output_dir = pathlib.Path(args.output_dir)
+            output_dir = pathlib.Path(os.environ["OQM_OUTPUT_DIR"])
             output_dir.mkdir(parents=True, exist_ok=True)
+
+            match = re.search(r"阅读上一阶段产物 (\\S+?)，", args.prompt)
+            data = {"topic": "unknown", "data": []}
+            if match:
+                data = json.loads(pathlib.Path(match.group(1)).read_text(encoding="utf-8"))
+
             (output_dir / "report.md").write_text(
                 f"# Analysis\\n\\n"
                 f"Topic: {data['topic']}\\n"
@@ -67,9 +69,10 @@ logging:
   level: DEBUG
   format: console
 agent:
+  adapter: claude
   default_cli: {sys.executable}
-  custom_command: {sys.executable} {fake_script}
-  tool_callback: cli
+  headless_args:
+    - {fake_script}
 notifier:
   pushplus:
     enabled: true
