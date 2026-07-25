@@ -142,6 +142,7 @@ async def test_agent_demo_pipeline_end_to_end(agent_demo_setup):
 
     report_path = agent_demo_setup.config.paths.artifacts / str(run_id) / "agent_analyze" / "report.md"
     assert report_path.exists()
+    assert "Topic: BTC market outlook" in report_path.read_text(encoding="utf-8")
 
     notify_stage = next((s for s in run.stage_runs if s.stage_name == "notify"), None)
     assert notify_stage is not None
