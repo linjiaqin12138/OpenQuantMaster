@@ -6,6 +6,8 @@ from runtime.agent_gateway.adapters.base import (
 )
 from runtime.agent_gateway.adapters.claude_adapter import ClaudeAdapter
 from runtime.agent_gateway.adapters.codex_adapter import CodexAdapter
+from runtime.agent_gateway.adapters.generic_adapter import GenericAdapter
+from runtime.agent_gateway.adapters.kimi_adapter import KimiAdapter
 from runtime.agent_gateway.agent_task import AgentTask
 from runtime.config_loader import AgentConfig
 
@@ -71,3 +73,24 @@ def test_codex_adapter_composes_command():
     assert cmd.argv[-2] == "exec"
     assert "agent_demo" in cmd.argv[-1]
     assert "-p" not in cmd.argv  # codex takes a positional prompt
+
+
+def test_kimi_adapter_composes_command():
+    config = AgentConfig(adapter="kimi", default_cli="kimi", headless_args=["--yes"])
+    cmd = KimiAdapter(config).compose_command(_task())
+    assert cmd.argv[:2] == ["kimi", "--yes"]
+    assert cmd.argv[-2] == "-p"
+    assert "agent_demo" in cmd.argv[-1]
+
+
+def test_generic_adapter_uses_configured_prompt_flag():
+    config = AgentConfig(
+        adapter="generic",
+        default_cli="mycli",
+        headless_args=["--quiet"],
+        generic={"prompt_flag": "--prompt"},
+    )
+    cmd = GenericAdapter(config).compose_command(_task())
+    assert cmd.argv[:2] == ["mycli", "--quiet"]
+    assert cmd.argv[-2] == "--prompt"
+    assert "agent_demo" in cmd.argv[-1]
