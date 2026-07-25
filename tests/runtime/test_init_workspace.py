@@ -1,7 +1,9 @@
 import json
 
 import pytest
+from click.testing import CliRunner
 
+from runtime.cli import cli
 from runtime.workspace.init_workspace import init_workspace
 
 
@@ -82,3 +84,24 @@ def test_init_workspace_force_overwrites(project_root):
 def test_init_workspace_rejects_unknown_target(project_root):
     with pytest.raises(ValueError, match="Unknown agent target"):
         init_workspace(project_root, ["gpt"])
+
+
+@pytest.mark.unit
+def test_init_workspace_cli(tmp_path):
+    (tmp_path / "skills" / "core").mkdir(parents=True)
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["init-workspace", "--agent", "claude", "--root", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "CLAUDE.md").exists()
+    assert "wrote" in result.output
+
+
+@pytest.mark.unit
+def test_init_workspace_cli_requires_agent(tmp_path):
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["init-workspace", "--root", str(tmp_path)])
+
+    assert result.exit_code != 0

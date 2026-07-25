@@ -42,5 +42,31 @@ def tool(tool_name: str, inputs: str) -> None:
     click.echo(result.model_dump_json())
 
 
+@cli.command(name="init-workspace")
+@click.option(
+    "--agent",
+    "agents",
+    multiple=True,
+    required=True,
+    type=click.Choice(["claude", "codex", "kimi"]),
+    help="Target agent CLI. Repeatable.",
+)
+@click.option("--force", is_flag=True, help="Overwrite existing files.")
+@click.option(
+    "--root",
+    type=click.Path(path_type=Path, file_okay=False),
+    default=Path("."),
+    help="Project root to initialize.",
+)
+def init_workspace(agents: tuple[str, ...], force: bool, root: Path) -> None:
+    from runtime.workspace.init_workspace import init_workspace as _init
+
+    written = _init(root, list(agents), force=force)
+    if not written:
+        click.echo("Nothing to write (all files exist; use --force to overwrite).")
+    for path in written:
+        click.echo(f"wrote {path}")
+
+
 if __name__ == "__main__":
     cli()
