@@ -48,7 +48,7 @@ class PipelineRunner:
         self._registry = registry
         self._agent_driver = agent_driver
         self._notifier = notifier
-        self._pipelines_dir = Path("pipelines")
+        self._pipelines_dir = config.paths.pipelines
         self._schema = self._load_schema()
         self._checkpoint = CheckpointWriter(store)
 

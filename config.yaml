@@ -5,6 +5,7 @@ paths:
   artifacts: ./artifacts
   logs: ./logs
   database: ./data/runtime.db
+  pipelines: ./pipelines
 
 scheduler:
   timezone: UTC

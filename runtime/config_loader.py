@@ -13,6 +13,7 @@ class PathsConfig(BaseModel):
     artifacts: Path = Path("./artifacts")
     logs: Path = Path("./logs")
     database: Path = Path("./data/runtime.db")
+    pipelines: Path = Path("./pipelines")
 
 
 class SchedulerConfig(BaseModel):
