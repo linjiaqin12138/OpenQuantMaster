@@ -161,7 +161,7 @@ Adapter-specific argv:
 | CLI | Headless invocation |
 |-----|---------------------|
 | Claude Code | `claude -p <prompt> --allowed-tools "Read,Write,Edit,Bash,Skill"` |
-| Codex | `codex exec -c approval_policy="never" -c sandbox_mode="workspace-write" <prompt>` |
+| Codex | `codex -c approval_policy=never -c sandbox_mode=workspace-write exec <prompt>` |
 | Kimi | `kimi -p <prompt>` (confirm flag at implementation time) |
 | Generic | `<default_cli> <headless_args...> <prompt_flag> <prompt>` |
 
@@ -220,7 +220,8 @@ Storage: append-only JSONL at `data/memory/lessons.jsonl` (path configurable und
 agent:
   adapter: claude            # claude | codex | kimi | generic
   default_cli: claude        # executable name/path
-  timeout_sec: 300
+  timeout_sec: 300           # default stage timeout; agent_tool input overrides per stage
+  workdir: ""                # agent subprocess cwd; bootstrap defaults it to the config file's directory
   headless_args: []          # extra argv passed before the prompt
   generic:
     prompt_flag: "-p"        # generic adapter only
@@ -281,8 +282,7 @@ tests/
 | Unit | Each adapter composes correct argv/env/cwd from an `AgentTask` |
 | Unit | `init-workspace` generates the full layout per target; idempotent; `--force` overwrites; settings.json merge |
 | Unit | `CliBackend` summary extraction and stdout fallback (fake CLI script) |
-| Integration | `agent_demo` pipeline end-to-end with a fake CLI executable (writes `report.md`), asserting stage success, report artifact, and notify body |
-| Integration (manual/opt-in) | Real `claude -p` run of `agent_demo`, skipped unless `claude` is on PATH |
+| Integration | `agent_demo` pipeline end-to-end with a fake CLI executable (writes `report.md`), asserting stage success, report artifact, real artifact content used, and notify body |
 
 No live network calls; PushPlus remains mocked as in the demo.
 
