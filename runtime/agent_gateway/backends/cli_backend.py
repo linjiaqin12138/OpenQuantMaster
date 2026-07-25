@@ -1,56 +1,49 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
-import shlex
 from pathlib import Path
 
+from runtime.agent_gateway.adapters.base import BaseAdapter
 from runtime.agent_gateway.agent_result import AgentResult
 from runtime.agent_gateway.agent_task import AgentTask
+from runtime.config_loader import AgentConfig
 
 from .base import BaseBackend
 
 
 class CliBackend(BaseBackend):
+    def __init__(self, config: AgentConfig, adapter: BaseAdapter) -> None:
+        self._config = config
+        self._adapter = adapter
+
     async def run(self, task: AgentTask) -> AgentResult:
-        skill_path = self._resolve_skill_path(task.skill_path)
         output_dir = Path(task.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        args = [
-            "--skill",
-            str(skill_path),
-            "--artifact",
-            task.previous_artifact_path,
-            "--output-dir",
-            str(output_dir),
-            "--task",
-            task.task_description,
-        ]
+        command = self._adapter.compose_command(task)
+        env = {**os.environ, **command.env}
 
+        proc = None
         try:
-            if self._config.custom_command:
-                cmd = self._config.custom_command + " " + " ".join(
-                    shlex.quote(arg) for arg in args
-                )
-                proc = await asyncio.create_subprocess_shell(
-                    cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-            else:
-                cmd = [self._config.default_cli, *self._config.headless_args, *args]
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-
+            proc = await asyncio.create_subprocess_exec(
+                *command.argv,
+                cwd=command.cwd,
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=task.timeout_sec
             )
+        except FileNotFoundError:
+            return AgentResult(
+                success=False,
+                error=f"Agent CLI not found: {command.argv[0]}",
+            )
         except asyncio.TimeoutError:
-            if proc.returncode is None:
+            if proc is not None and proc.returncode is None:
                 proc.kill()
                 await proc.wait()
             return AgentResult(
@@ -67,34 +60,23 @@ class CliBackend(BaseBackend):
             return AgentResult(success=False, error=error_msg)
 
         report_path = output_dir / "report.md"
-        if not report_path.exists():
-            return AgentResult(
-                success=False,
-                error=f"Report not found at {report_path}",
-            )
+        if report_path.exists():
+            report_content = report_path.read_text(encoding="utf-8")
+        else:
+            report_content = stdout.decode(encoding="utf-8", errors="replace")
+            if not report_content.strip():
+                return AgentResult(
+                    success=False,
+                    error=f"Report not found at {report_path} and stdout was empty",
+                )
+            report_path.write_text(report_content, encoding="utf-8")
 
-        report_content = report_path.read_text(encoding="utf-8")
         summary = self._extract_summary(report_content)
         return AgentResult(
             success=True,
             report_artifact="report.md",
             summary=summary,
         )
-
-    def _resolve_skill_path(self, skill_path: str) -> Path:
-        path = Path(skill_path)
-        if path.is_absolute() or path.exists():
-            return path
-
-        candidate = Path("skills") / skill_path
-        if candidate.exists():
-            return candidate
-
-        candidate_md = candidate.with_suffix(".md")
-        if candidate_md.exists():
-            return candidate_md
-
-        return candidate
 
     def _extract_summary(self, content: str) -> str:
         match = re.search(r"<!--\s*summary:\s*(.*?)\s*-->", content, re.DOTALL)

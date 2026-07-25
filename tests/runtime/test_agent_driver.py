@@ -5,30 +5,25 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from runtime.agent_gateway.agent_driver import AgentDriver
-from runtime.agent_gateway.agent_result import AgentResult
+from runtime.agent_gateway.adapters.base import AdapterCommand, BaseAdapter
 from runtime.agent_gateway.agent_task import AgentTask
 from runtime.agent_gateway.backends.cli_backend import CliBackend
 from runtime.config_loader import AgentConfig
 
 
-@pytest.mark.unit
-def test_agent_driver_selects_cli_backend():
-    config = AgentConfig(tool_callback="cli")
-    driver = AgentDriver(config)
-    assert isinstance(driver._backend, CliBackend)
+class FakeAdapter(BaseAdapter):
+    def __init__(self, argv: list[str]) -> None:
+        self._argv = argv
+
+    def compose_command(self, task: AgentTask) -> AdapterCommand:
+        return AdapterCommand(
+            argv=self._argv,
+            env={"OQM_RUN_ID": task.pipeline_run_id, "OQM_OUTPUT_DIR": task.output_dir},
+        )
 
 
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_cli_backend_command_construction_default_cli(tmp_path):
-    config = AgentConfig(
-        default_cli="echo",
-        headless_args=["--allow-external"],
-        tool_callback="cli",
-    )
-    backend = CliBackend(config)
-    task = AgentTask(
+def _task(tmp_path) -> AgentTask:
+    return AgentTask(
         skill_path="core/agent_demo",
         task_description="Analyze demo data",
         previous_artifact_path=str(tmp_path / "artifact.json"),
@@ -36,14 +31,22 @@ async def test_cli_backend_command_construction_default_cli(tmp_path):
         pipeline_run_id="run-123",
     )
 
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cli_backend_uses_adapter_command_and_env(tmp_path):
+    config = AgentConfig()
+    backend = CliBackend(config, FakeAdapter(["echo", "hello"]))
+    task = _task(tmp_path)
+
     (tmp_path / "output").mkdir(parents=True, exist_ok=True)
     (tmp_path / "output" / "report.md").write_text("<!-- summary: ok -->")
 
-    captured_cmd = None
+    captured = {}
 
     async def fake_create_subprocess_exec(*cmd, **kwargs):
-        nonlocal captured_cmd
-        captured_cmd = cmd
+        captured["cmd"] = cmd
+        captured["env"] = kwargs.get("env")
         proc = AsyncMock()
         proc.returncode = 0
         proc.communicate.return_value = (b"", b"")
@@ -53,96 +56,43 @@ async def test_cli_backend_command_construction_default_cli(tmp_path):
         result = await backend.run(task)
 
     assert result.success is True
-    assert captured_cmd is not None
-    assert captured_cmd[0] == "echo"
-    assert "--allow-external" in captured_cmd
-    assert "--skill" in captured_cmd
-    assert "--artifact" in captured_cmd
-    assert "--output-dir" in captured_cmd
-    assert "--task" in captured_cmd
+    assert captured["cmd"] == ("echo", "hello")
+    assert captured["env"]["OQM_RUN_ID"] == "run-123"
+    assert captured["env"]["OQM_OUTPUT_DIR"] == str(tmp_path / "output")
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_cli_backend_run_success(tmp_path):
-    script_path = tmp_path / "fake_agent.py"
-    script_path.write_text(
+async def test_cli_backend_stdout_fallback_writes_report(tmp_path):
+    script = tmp_path / "fake_cli.py"
+    script.write_text(
         textwrap.dedent(
             """
-            import argparse
-            import pathlib
-
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--skill")
-            parser.add_argument("--artifact")
-            parser.add_argument("--output-dir")
-            parser.add_argument("--task")
-            args = parser.parse_args()
-
-            output_dir = pathlib.Path(args.output_dir)
-            output_dir.mkdir(parents=True, exist_ok=True)
-            (output_dir / "report.md").write_text(
-                "Analysis complete.\\n<!-- summary: The demo signals are bullish. -->\\n"
-            )
+            print("# Report from stdout")
+            print()
+            print("<!-- summary: stdout fallback works. -->")
             """
         )
     )
+    config = AgentConfig()
+    backend = CliBackend(config, FakeAdapter([sys.executable, str(script)]))
 
-    config = AgentConfig(
-        default_cli=sys.executable,
-        headless_args=[str(script_path)],
-        tool_callback="cli",
-    )
-    backend = CliBackend(config)
-    task = AgentTask(
-        skill_path="core/agent_demo",
-        task_description="Analyze the generated data and write a short report.",
-        previous_artifact_path=str(tmp_path / "demo_data.json"),
-        output_dir=str(tmp_path / "agent_analyze"),
-        pipeline_run_id="run-123",
-    )
+    result = await backend.run(_task(tmp_path))
 
-    result = await backend.run(task)
-
-    assert isinstance(result, AgentResult)
     assert result.success is True
-    assert result.report_artifact == "report.md"
-    assert result.summary == "The demo signals are bullish."
+    assert result.summary == "stdout fallback works."
+    report = tmp_path / "output" / "report.md"
+    assert report.exists()
+    assert "Report from stdout" in report.read_text()
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_cli_backend_run_missing_report(tmp_path):
-    script_path = tmp_path / "fake_agent_no_report.py"
-    script_path.write_text(
-        textwrap.dedent(
-            """
-            import argparse
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--skill")
-            parser.add_argument("--artifact")
-            parser.add_argument("--output-dir")
-            parser.add_argument("--task")
-            args = parser.parse_args()
-            """
-        )
-    )
+async def test_cli_backend_fails_when_no_report_and_empty_stdout(tmp_path):
+    config = AgentConfig()
+    backend = CliBackend(config, FakeAdapter([sys.executable, "-c", "pass"]))
 
-    config = AgentConfig(
-        default_cli=sys.executable,
-        headless_args=[str(script_path)],
-        tool_callback="cli",
-    )
-    backend = CliBackend(config)
-    task = AgentTask(
-        skill_path="core/agent_demo",
-        task_description="Analyze",
-        previous_artifact_path=str(tmp_path / "demo_data.json"),
-        output_dir=str(tmp_path / "agent_analyze"),
-        pipeline_run_id="run-123",
-    )
-
-    result = await backend.run(task)
+    result = await backend.run(_task(tmp_path))
 
     assert result.success is False
     assert "Report not found" in result.error
@@ -150,67 +100,43 @@ async def test_cli_backend_run_missing_report(tmp_path):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_cli_backend_run_timeout(tmp_path):
-    script_path = tmp_path / "fake_agent_sleep.py"
-    script_path.write_text(
-        textwrap.dedent(
-            """
-            import time
-            time.sleep(10)
-            """
-        )
+async def test_cli_backend_cli_not_found(tmp_path):
+    config = AgentConfig()
+    backend = CliBackend(config, FakeAdapter(["definitely-not-a-real-cli-oqm"]))
+
+    result = await backend.run(_task(tmp_path))
+
+    assert result.success is False
+    assert "Agent CLI not found" in result.error
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cli_backend_nonzero_exit_returns_stderr(tmp_path):
+    config = AgentConfig()
+    backend = CliBackend(
+        config,
+        FakeAdapter([sys.executable, "-c", "import sys; sys.stderr.write('boom'); sys.exit(3)"]),
     )
 
-    config = AgentConfig(
-        default_cli=sys.executable,
-        headless_args=[str(script_path)],
-        tool_callback="cli",
+    result = await backend.run(_task(tmp_path))
+
+    assert result.success is False
+    assert result.error == "boom"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cli_backend_timeout_kills_process(tmp_path):
+    config = AgentConfig()
+    backend = CliBackend(
+        config,
+        FakeAdapter([sys.executable, "-c", "import time; time.sleep(30)"]),
     )
-    backend = CliBackend(config)
-    task = AgentTask(
-        skill_path="core/agent_demo",
-        task_description="Analyze",
-        previous_artifact_path=str(tmp_path / "demo_data.json"),
-        output_dir=str(tmp_path / "agent_analyze"),
-        pipeline_run_id="run-123",
-        timeout_sec=1,
-    )
+    task = _task(tmp_path)
+    task = task.model_copy(update={"timeout_sec": 1})
 
     result = await backend.run(task)
 
     assert result.success is False
     assert "timed out" in result.error
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_cli_backend_run_nonzero_exit(tmp_path):
-    script_path = tmp_path / "fake_agent_fail.py"
-    script_path.write_text(
-        textwrap.dedent(
-            """
-            import sys
-            print("something went wrong", file=sys.stderr)
-            sys.exit(1)
-            """
-        )
-    )
-
-    config = AgentConfig(
-        default_cli=sys.executable,
-        headless_args=[str(script_path)],
-        tool_callback="cli",
-    )
-    backend = CliBackend(config)
-    task = AgentTask(
-        skill_path="core/agent_demo",
-        task_description="Analyze",
-        previous_artifact_path=str(tmp_path / "demo_data.json"),
-        output_dir=str(tmp_path / "agent_analyze"),
-        pipeline_run_id="run-123",
-    )
-
-    result = await backend.run(task)
-
-    assert result.success is False
-    assert "something went wrong" in result.error
