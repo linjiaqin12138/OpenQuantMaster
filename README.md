@@ -49,17 +49,27 @@ market_data:
 vibe_trading:
   mode: cli
   cli_path: vibe-trading
-  http_url: http://localhost:8000
+  mcp_command: vibe-trading-mcp
   mcp_url: stdio
+  http_url: http://localhost:8000
+  auto_start_mcp: true
+  read_only: true
+  allowed_capabilities:
+    - backtest
+    - research
+    - alpha_bench
+    - swarm
+    - hypothesis
+    - web_search
 ```
 
 ### Configuration sections
 
 - `paths` — where runtime artifacts, logs, and the SQLite database are stored.
 - `scheduler` — default timezone for cron-triggered pipelines.
-- `market_data.crypto` — default crypto exchange and optional exchange API keys.
+- `market_data.crypto` — default crypto exchange and optional API keys.
 - `market_data.equities` — `tushare_token` for A-share data and `yfinance_timeout` for US/HK equities.
-- `vibe_trading` — how the `backtest_tool` invokes the Vibe-Trading backtest runner (`cli`, `http`, or `mcp`).
+- `vibe_trading` — transport and security settings for the unified `vibe_tool` (`cli`, `mcp`, or `http`).
 
 ### Environment variables
 
@@ -180,51 +190,26 @@ quantmaster-run crypto_15m_data
 
 Output is a CSV artifact stored under `./artifacts/<run_id>/fetch_sol/ohlcv_SOLUSDT.P_15m.csv`.
 
-### `backtest_tool`
+### `vibe_tool`
 
-Run a research backtest through the Vibe-Trading backtest runner.
+Unified gateway to [Vibe-Trading](https://github.com/HKUDS/Vibe-Trading). It exposes Vibe-Trading capabilities (backtest, research, alpha bench, swarm, etc.) as a single OQM tool. Transport is controlled by `vibe_trading.mode` in `config.yaml`.
 
 **Dependency**
 
-`backtest_tool` integrates with the real [`vibe-trading-ai`](https://github.com/HKUDS/Vibe-Trading)
-package. It is not declared as a project dependency because it is optional and
-requires its own LLM provider configuration. Install it separately:
-
 ```bash
+pip install -e ".[vibe]"
+# or standalone
 pip install vibe-trading-ai
 ```
-
-Two invocation paths are supported:
-
-1. **`run_dir` (deterministic, no LLM required)** — point the tool at an existing
-   Vibe-Trading run directory that contains `config.json` + `code/signal_engine.py`.
-   It invokes the Vibe-Trading backtest runner:
-
-   ```bash
-   python -m backtest.runner <run_dir>
-   ```
-
-   Artifacts are read from `<run_dir>/artifacts/`.
-
-2. **`strategy_description` (agentic, requires LLM key)** — the tool calls the
-   Vibe-Trading agent CLI and asks it to produce a backtest:
-
-   ```bash
-   vibe-trading run -p "Backtest <strategy_description> on <symbols>" --json
-   ```
-
-   The CLI returns a JSON summary with `run_dir`; the tool reads artifacts from
-   `<run_dir>/artifacts/`.
 
 **Configuring the LLM provider**
 
 Vibe-Trading reads provider credentials from `~/.vibe-trading/.env`. Create that
-file and uncomment exactly one provider block (replace `...` with your real key):
+file and uncomment exactly one provider block:
 
 ```bash
 mkdir -p ~/.vibe-trading
 
-# Example: DeepSeek
 cat > ~/.vibe-trading/.env <<EOF
 LANGCHAIN_PROVIDER=deepseek
 LANGCHAIN_MODEL_NAME=deepseek-v4-pro
@@ -235,14 +220,7 @@ EOF
 chmod 600 ~/.vibe-trading/.env
 ```
 
-Other supported providers use the same pattern:
-
-| Provider | `LANGCHAIN_PROVIDER` | `LANGCHAIN_MODEL_NAME` | Key env var | Base URL env var |
-|----------|----------------------|------------------------|-------------|------------------|
-| OpenRouter | `openrouter` | `deepseek/deepseek-v4-pro` | `OPENROUTER_API_KEY` | `OPENROUTER_BASE_URL` |
-| OpenAI | `openai` | `gpt-5.5` | `OPENAI_API_KEY` | `OPENAI_BASE_URL` |
-| DeepSeek | `deepseek` | `deepseek-v4-pro` | `DEEPSEEK_API_KEY` | `DEEPSEEK_BASE_URL` |
-| Ollama | `ollama` | `qwen2.5:32b` | none | `OLLAMA_BASE_URL` |
+Other supported providers use the same pattern (`openrouter`, `openai`, `ollama`).
 
 Verify the configuration:
 
@@ -250,22 +228,14 @@ Verify the configuration:
 vibe-trading provider doctor
 ```
 
-If you already have a run directory that contains the artifacts below, you can bypass
-the agent/runner entirely by passing `run_dir`.
-
 **Inputs**
 
-| Field                | Required | Description                                              |
-|----------------------|----------|----------------------------------------------------------|
-| strategy_description | yes*     | Natural-language strategy description.                   |
-| run_dir              | yes*     | Path to an existing Vibe-Trading output directory.       |
-| market               | yes      | `crypto`, `a_share`, `us_equity`, or `hk_equity`.        |
-| symbols              | yes      | List of symbols to backtest.                             |
-| start                | no       | Backtest start date (`YYYY-MM-DD`).                      |
-| end                  | no       | Backtest end date (`YYYY-MM-DD`).                        |
-| mode                 | no       | Override `vibe_trading.mode` (`cli`, `http`, or `mcp`).  |
-
-*Either `strategy_description` or `run_dir` is required.
+| Field     | Required | Description                                                        |
+|-----------|----------|--------------------------------------------------------------------|
+| capability | yes      | Vibe-Trading capability: `backtest`, `research`, `alpha_bench`, `swarm`, `hypothesis`, `web_search`, or raw MCP tool name. |
+| inputs    | no       | Capability-specific arguments.                                     |
+| mode      | no       | Override `vibe_trading.mode` (`cli`, `http`, or `mcp`).            |
+| timeout_sec | no     | Per-call timeout.                                                  |
 
 **Example pipeline**
 
@@ -277,16 +247,30 @@ trigger:
   type: manual
 stages:
   - name: backtest
-    tool: backtest_tool
+    tool: vibe_tool
     inputs:
-      strategy_description: "dual EMA on SOLUSDT.P"
-      market: "crypto"
-      symbols: ["SOLUSDT.P"]
-      start: "2026-01-01"
-      end: "2026-06-30"
+      capability: "backtest"
+      inputs:
+        strategy_description: "dual EMA on SOLUSDT.P"
+        market: "crypto"
+        symbols: ["SOLUSDT.P"]
+        start: "2026-01-01"
+        end: "2026-06-30"
 ```
 
-Artifacts produced: `equity.csv`, `trades.csv`, `metrics.csv`, and `run_card.json`.
+For deterministic replay of an existing Vibe-Trading run:
+
+```yaml
+stages:
+  - name: backtest
+    tool: vibe_tool
+    inputs:
+      capability: "backtest"
+      inputs:
+        run_dir: "./vibe_runs/dual_ema_v1_20260716_080000"
+```
+
+Artifacts produced by `backtest`: `equity.csv`, `trades.csv`, `metrics.csv`, and `run_card.json`.
 
 ### `signal_scan_tool`
 

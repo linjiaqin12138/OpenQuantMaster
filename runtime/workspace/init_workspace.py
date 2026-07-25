@@ -39,6 +39,7 @@ def _render(template_name: str) -> str:
 def _load_skills(project_root: Path) -> list[tuple[str, str]]:
     skills: list[tuple[str, str]] = [
         ("oqm-tool", _render("skills/oqm-tool.SKILL.md")),
+        ("vibe-trading", _render("skills/vibe-trading.SKILL.md")),
     ]
     core_dir = project_root / "skills" / "core"
     if core_dir.is_dir():

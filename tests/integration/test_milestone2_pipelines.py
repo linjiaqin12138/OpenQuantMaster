@@ -205,7 +205,7 @@ async def test_backtest_demo_pipeline(m2_setup, tmp_path, monkeypatch):
         return fake_proc
 
     monkeypatch.setattr(
-        "tools.research.backtest_tool.asyncio.create_subprocess_exec",
+        "runtime.vibe_bridge.asyncio.create_subprocess_exec",
         fake_create_subprocess_exec,
     )
 
@@ -219,11 +219,14 @@ async def test_backtest_demo_pipeline(m2_setup, tmp_path, monkeypatch):
                 "stages": [
                     {
                         "name": "backtest",
-                        "tool": "backtest_tool",
+                        "tool": "vibe_tool",
                         "inputs": {
-                            "run_dir": str(run_dir),
-                            "market": "crypto",
-                            "symbols": ["SOLUSDT.P"],
+                            "capability": "backtest",
+                            "inputs": {
+                                "run_dir": str(run_dir),
+                                "market": "crypto",
+                                "symbols": ["SOLUSDT.P"],
+                            },
                         },
                     }
                 ],

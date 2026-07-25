@@ -49,6 +49,19 @@ class VibeTradingConfig(BaseModel):
     cli_path: str = "vibe-trading"
     http_url: str = "http://localhost:8000"
     mcp_url: str = "stdio"
+    mcp_command: str = "vibe-trading-mcp"
+    auto_start_mcp: bool = True
+    read_only: bool = True
+    allowed_capabilities: list[str] = Field(
+        default_factory=lambda: [
+            "backtest",
+            "research",
+            "alpha_bench",
+            "swarm",
+            "hypothesis",
+            "web_search",
+        ]
+    )
 
 
 class GenericAgentConfig(BaseModel):

@@ -28,8 +28,18 @@ market_data:
 vibe_trading:
   mode: cli
   cli_path: vibe-trading
-  http_url: http://localhost:8000
+  mcp_command: vibe-trading-mcp
   mcp_url: stdio
+  http_url: http://localhost:8000
+  auto_start_mcp: true
+  read_only: true
+  allowed_capabilities:
+    - backtest
+    - research
+    - alpha_bench
+    - swarm
+    - hypothesis
+    - web_search
 
 agent:
   adapter: "claude"

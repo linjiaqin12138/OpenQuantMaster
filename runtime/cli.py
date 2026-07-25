@@ -42,6 +42,53 @@ def tool(tool_name: str, inputs: str) -> None:
     click.echo(result.model_dump_json())
 
 
+@cli.command(name="list-tools")
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["json", "markdown"]),
+    default="json",
+    help="Output format.",
+)
+def list_tools(fmt: str) -> None:
+    import tools
+
+    registry = ToolRegistry()
+    registry.discover(tools)
+    rows = []
+    for name in registry.list_tools():
+        tool = registry.get(name)
+        rows.append(
+            {
+                "name": tool.name,
+                "capability": tool.capability,
+                "version": tool.version,
+                "input_schema": tool.input_schema,
+                "output_schema": tool.output_schema,
+            }
+        )
+
+    if fmt == "json":
+        click.echo(json.dumps(rows, indent=2, ensure_ascii=False))
+        return
+
+    lines = ["# OpenQuantMaster registered tools", ""]
+    for row in rows:
+        lines.append(f"## {row['name']} (v{row['version']}, capability: {row['capability']})")
+        lines.append("")
+        lines.append("**Input schema**")
+        lines.append("```json")
+        lines.append(json.dumps(row["input_schema"], indent=2, ensure_ascii=False))
+        lines.append("```")
+        lines.append("")
+        lines.append("**Output schema**")
+        lines.append("```json")
+        lines.append(json.dumps(row["output_schema"], indent=2, ensure_ascii=False))
+        lines.append("```")
+        lines.append("")
+    click.echo("\n".join(lines))
+
+
 @cli.command(name="init-workspace")
 @click.option(
     "--agent",
