@@ -9,11 +9,33 @@ Run tests: `pytest -m unit -v`
 Run integration tests: `pytest -m integration -v`
 Run linter: `ruff check runtime tools tests`
 
-## Agent Integration Demo
+## Agent Integration
 
-The `agent_demo` pipeline demonstrates an external Agent CLI invoked as a pipeline stage.
+Pipeline Agent stages invoke a real Agent CLI (`claude`, `codex`, `kimi`, or a
+`generic` CLI) headlessly with a minimal prompt. The Agent reads skills and
+artifacts itself and writes its report to `$OQM_OUTPUT_DIR/report.md`.
 
-Run it with:
+Initialize this repo as an Agent workspace before running Agent stages:
+
+```bash
+python -m runtime.cli init-workspace --agent claude   # and/or: --agent codex --agent kimi
+```
+
+This generates `CLAUDE.md`/`AGENTS.md`, `.claude/` or `.agents/` skill folders
+(including the `oqm-tool` skill and synced business skills from `skills/core/`),
+and merges tool-call permissions into `.claude/settings.json`.
+
+Configure the CLI in `config.yaml`:
+
+```yaml
+agent:
+  adapter: "claude"        # claude | codex | kimi | generic
+  default_cli: "claude"
+  timeout_sec: 300
+  headless_args: []
+```
+
+Run the demo pipeline:
 
 ```bash
 quantmaster-daemon --run agent_demo
@@ -24,7 +46,7 @@ Stages:
 2. `agent_analyze` — invokes the configured Agent CLI with skill `skills/core/agent_demo.md`.
 3. `notify` — sends the summary via PushPlus.
 
-Configure the Agent CLI and notifier in `config.yaml` under `agent:` and `notifier:`. Set the PushPlus token via environment variable `QUANT_AGENT_NOTIFIER__PUSHPLUS__TOKEN`.
+Set the PushPlus token via environment variable `QUANT_AGENT_NOTIFIER__PUSHPLUS__TOKEN`.
 
 For manual tool invocation:
 
