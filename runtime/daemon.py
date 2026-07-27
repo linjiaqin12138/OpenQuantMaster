@@ -10,6 +10,8 @@ import click
 import structlog
 
 from runtime.bootstrap import StartupError, bootstrap
+from runtime.config_loader import load_config
+from runtime.logging_config import configure_logging
 from runtime.state_store.models import RunStatus
 
 logger = structlog.get_logger()
@@ -91,21 +93,8 @@ class Daemon:
 def main(run_pipeline: str | None, config_path: Path | None, preflight: bool) -> None:
     import tools
 
-    structlog.configure(
-        processors=[
-            structlog.stdlib.filter_by_level,
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            structlog.processors.JSONRenderer(),
-        ],
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        wrapper_class=structlog.stdlib.BoundLogger,
-        cache_logger_on_first_use=True,
-    )
+    cfg = load_config(config_path)
+    configure_logging(cfg)
     daemon = Daemon()
     exit_code = asyncio.run(daemon.run(config_path, run_pipeline, preflight, package=tools))
     if exit_code:

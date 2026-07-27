@@ -6,7 +6,9 @@ from pathlib import Path
 
 import click
 
+from runtime.config_loader import load_config
 from runtime.daemon import Daemon
+from runtime.logging_config import configure_logging
 from tools.base.tool_registry import ToolRegistry
 
 
@@ -22,6 +24,8 @@ def cli() -> None:
 def run_pipeline(pipeline_name: str, config_path: Path | None) -> None:
     import tools
 
+    cfg = load_config(config_path)
+    configure_logging(cfg)
     daemon = Daemon()
     exit_code = asyncio.run(daemon.run(config_path, pipeline_name, preflight=False, package=tools))
     if exit_code:
@@ -31,9 +35,12 @@ def run_pipeline(pipeline_name: str, config_path: Path | None) -> None:
 @cli.command()
 @click.argument("tool_name")
 @click.option("--inputs", default="{}", help="JSON-encoded inputs for the tool.")
-def tool(tool_name: str, inputs: str) -> None:
+@click.option("--config", "config_path", type=click.Path(path_type=Path), help="Path to config.yaml.")
+def tool(tool_name: str, inputs: str, config_path: Path | None) -> None:
     import tools
 
+    cfg = load_config(config_path)
+    configure_logging(cfg)
     registry = ToolRegistry()
     registry.discover(tools)
     discovered_tool = registry.get(tool_name)
