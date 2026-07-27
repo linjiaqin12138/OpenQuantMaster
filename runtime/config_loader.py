@@ -111,6 +111,20 @@ class NotifierConfig(BaseModel):
     email: EmailConfig = Field(default_factory=EmailConfig)
 
 
+class OpenAliceConfig(BaseModel):
+    workspace_id: str = "auto-quant-clear-willow-field"
+    cli_gateway_url: str = "http://127.0.0.1:47332"
+    export: str = "data"
+
+
+class LLMConfig(BaseModel):
+    provider: str = "openai"
+    model: str = "gpt-4o-mini"
+    api_key: str = ""
+    api_base: str = ""
+    timeout: int = 30
+
+
 class RuntimeConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="QUANT_AGENT_",
@@ -129,6 +143,8 @@ class RuntimeConfig(BaseSettings):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     mcp: McpConfig = Field(default_factory=McpConfig)
     notifier: NotifierConfig = Field(default_factory=NotifierConfig)
+    openalice: OpenAliceConfig = Field(default_factory=OpenAliceConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
     config_path: Path | None = None
 
     @property

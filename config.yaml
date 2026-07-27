@@ -70,3 +70,15 @@ notifier:
     password: ""
     from_addr: ""
     to_addrs: []
+
+openalice:
+  workspace_id: auto-quant-clear-willow-field
+  cli_gateway_url: http://127.0.0.1:47332
+  export: data
+
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: ""
+  api_base: ""
+  timeout: 30
