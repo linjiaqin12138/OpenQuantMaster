@@ -18,7 +18,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from runtime.config_loader import RuntimeConfig, load_config
+from runtime.config_loader import RuntimeConfig, get_llm_config, load_config
 from runtime.notifier.composite import build_notifier
 from runtime.openalice_client import OpenAliceClient, OpenAliceError
 from tools.base.base_tool import BaseTool
@@ -126,7 +126,7 @@ class NewsFilterTool(BaseTool):
         degraded: list[ScoredArticle] = []
         scored_count = 0
 
-        llm_cfg = cfg.llm
+        llm_cfg = get_llm_config(cfg, self.name)
         model, api_key, api_base, timeout = self._normalize_llm_settings(llm_cfg)
 
         try:

@@ -25,9 +25,16 @@ llm:
   api_key: ""          # or set env var QUANT_AGENT_LLM__API_KEY
   api_base: ""         # optional custom endpoint
   timeout: 30
+
+# Optional: per-tool LLM override. Fields not listed inherit from `llm` above.
+tools:
+  news_filter_tool:
+    llm:
+      model: gpt-4o-mini
+      timeout: 15
 ```
 
-The `llm.api_key` can also be supplied via the environment variable `QUANT_AGENT_LLM__API_KEY` thanks to `pydantic-settings` nested env overrides.
+`news_filter_tool` first looks for `tools.news_filter_tool.llm`. Any field explicitly set there overrides the global `llm` block; unset fields inherit the defaults. The `llm.api_key` can also be supplied via the environment variable `QUANT_AGENT_LLM__API_KEY`, and a tool-level override can be set via `QUANT_AGENT_TOOLS__NEWS_FILTER_TOOL__LLM__MODEL` (etc.).
 
 Supported model strings include:
 

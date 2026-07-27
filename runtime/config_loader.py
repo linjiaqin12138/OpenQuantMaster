@@ -125,6 +125,12 @@ class LLMConfig(BaseModel):
     timeout: int = 30
 
 
+class ToolConfig(BaseModel):
+    """Per-tool configuration overrides. Currently only supports LLM."""
+
+    llm: LLMConfig | None = None
+
+
 class RuntimeConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="QUANT_AGENT_",
@@ -145,11 +151,31 @@ class RuntimeConfig(BaseSettings):
     notifier: NotifierConfig = Field(default_factory=NotifierConfig)
     openalice: OpenAliceConfig = Field(default_factory=OpenAliceConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    tools: dict[str, ToolConfig] = Field(default_factory=dict)
     config_path: Path | None = None
 
     @property
     def database_url(self) -> str:
         return f"sqlite+aiosqlite:///{self.paths.database}"
+
+
+def get_llm_config(cfg: RuntimeConfig, tool_name: str) -> LLMConfig:
+    """Resolve the effective LLM config for a tool.
+
+    Starts from the global ``cfg.llm`` and merges any per-tool overrides
+    declared under ``cfg.tools[tool_name].llm``. Only fields explicitly set
+    in the override (via YAML or environment variables) replace the defaults;
+    unset fields inherit the global values.
+    """
+    tool_cfg = cfg.tools.get(tool_name)
+    if tool_cfg is None or tool_cfg.llm is None:
+        return cfg.llm
+
+    base = cfg.llm.model_dump()
+    override = tool_cfg.llm
+    for field in override.model_fields_set:
+        base[field] = getattr(override, field)
+    return LLMConfig(**base)
 
 
 def _load_env_overrides(prefix: str = "QUANT_AGENT_") -> dict[str, Any]:

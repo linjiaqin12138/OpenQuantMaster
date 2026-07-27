@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from runtime.config_loader import OpenAliceConfig
+from runtime.config_loader import OpenAliceConfig, get_llm_config
 from runtime.openalice_client import OpenAliceClient, OpenAliceError
 from tools.news.news_filter_tool import NewsFilterTool
 
@@ -311,3 +311,59 @@ async def test_openalice_client_raises_on_http_error():
     with patch("runtime.openalice_client.httpx.AsyncClient", return_value=mock_http):
         with pytest.raises(OpenAliceError):
             await client.window_rss(from_time="2026-07-26", limit=1)
+
+
+@pytest.mark.unit
+def test_get_llm_config_returns_global_default():
+    from runtime.config_loader import LLMConfig, RuntimeConfig
+
+    cfg = RuntimeConfig(llm=LLMConfig(model="gpt-4o-mini", timeout=30))
+    resolved = get_llm_config(cfg, "news_filter_tool")
+    assert resolved.model == "gpt-4o-mini"
+    assert resolved.timeout == 30
+
+
+@pytest.mark.unit
+def test_get_llm_config_tool_override_merges():
+    from runtime.config_loader import LLMConfig, RuntimeConfig, ToolConfig
+
+    cfg = RuntimeConfig(
+        llm=LLMConfig(model="gpt-4o-mini", timeout=30, api_key="default-key"),
+        tools={
+            "news_filter_tool": ToolConfig(
+                llm=LLMConfig(model="anthropic/claude-3-5-sonnet-20241022", timeout=15)
+            )
+        },
+    )
+    resolved = get_llm_config(cfg, "news_filter_tool")
+    assert resolved.model == "anthropic/claude-3-5-sonnet-20241022"
+    assert resolved.timeout == 15
+    assert resolved.api_key == "default-key"  # inherited
+
+
+@pytest.mark.unit
+def test_get_llm_config_tool_override_ignores_other_tools():
+    from runtime.config_loader import LLMConfig, RuntimeConfig, ToolConfig
+
+    cfg = RuntimeConfig(
+        llm=LLMConfig(model="gpt-4o-mini"),
+        tools={
+            "other_tool": ToolConfig(llm=LLMConfig(model="other-model"))
+        },
+    )
+    resolved = get_llm_config(cfg, "news_filter_tool")
+    assert resolved.model == "gpt-4o-mini"
+
+
+@pytest.mark.unit
+def test_get_llm_config_env_override(monkeypatch):
+    from runtime.config_loader import RuntimeConfig
+
+    monkeypatch.setenv("QUANT_AGENT_LLM__MODEL", "gpt-4o-mini")
+    monkeypatch.setenv(
+        "QUANT_AGENT_TOOLS__NEWS_FILTER_TOOL__LLM__MODEL",
+        "anthropic/claude-3-5-sonnet-20241022",
+    )
+    cfg = RuntimeConfig()
+    resolved = get_llm_config(cfg, "news_filter_tool")
+    assert resolved.model == "anthropic/claude-3-5-sonnet-20241022"

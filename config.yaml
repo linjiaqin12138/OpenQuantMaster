@@ -82,3 +82,17 @@ llm:
   api_key: ""
   api_base: ""
   timeout: 30
+
+# Per-tool configuration overrides. Each tool can override any LLM field;
+# fields not listed inherit from the global `llm` block above.
+# Example:
+# tools:
+#   news_filter_tool:
+#     llm:
+#       model: gpt-4o-mini
+#       timeout: 15
+#   some_analysis_tool:
+#     llm:
+#       model: anthropic/claude-3-5-sonnet-20241022
+#       api_key: sk-ant-...
+tools: {}
