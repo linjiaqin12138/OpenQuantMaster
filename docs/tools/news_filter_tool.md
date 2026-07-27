@@ -50,6 +50,7 @@ Supported model strings include:
 | `limit` | integer | no | `100` | Max articles to fetch from OpenAlice. |
 | `min_score` | float | no | `0.6` | Articles with `score >= min_score` are classified as `high`. |
 | `medium_score` | float | no | `0.3` | Articles with `medium_score <= score < min_score` are classified as `medium_pending`. Must be `<= min_score`. |
+| `read_concurrency` | integer | no | `5` | Max concurrent `readRss` calls when enriching articles with full metadata. |
 | `pipeline_run_id` | string | no | `null` | Pipeline run ID used to organize the output artifact. |
 
 ## Output structure
@@ -67,7 +68,8 @@ On success, `ToolResult.data` contains:
       "time": "2026-07-26T00:00:14.000Z",
       "title": "...",
       "source": "scmp-business",
-      "link": "...",
+      "link": "https://www.scmp.com/...full-untruncated-url...",
+      "content": "Full article text...",
       "score": 0.85,
       "reason": "Regulatory approval is bullish for crypto markets."
     }
@@ -92,7 +94,7 @@ On success, `ToolResult.data` contains:
 - `total` — total raw articles returned by OpenAlice.
 - `new` — articles not already present in `data/watch_state.json`.
 - `scored` — articles successfully parsed into a numeric score (excludes `degraded`).
-- `high` — urgent / black-swan-like articles.
+- `high` — urgent / black-swan-like articles. Each entry includes the full `link` and `content` fetched via `readRss`.
 - `medium_pending` — relevant but not immediately actionable articles.
 - `degraded` — articles whose LLM response could not be parsed.
 - `artifact` — relative path to the persisted JSON artifact.
@@ -163,5 +165,7 @@ stages:
 ## Notes
 
 - The LLM is called once per new article. Each call is retried up to 3 times with exponential backoff.
+- Before scoring, each new article is enriched via OpenAlice `readRss(id)` to obtain the full, untruncated `metadata` (including `link`) and article `content`. These calls run concurrently, bounded by `read_concurrency`.
+- If `readRss` fails for an article, that article is skipped for the current run (it remains in `watch_state.json` and will be retried on the next poll).
 - `response_format: {"type": "json_object"}` is used when the provider supports it.
 - Scores are clamped to the `[0.0, 1.0]` range before binning.

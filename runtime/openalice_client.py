@@ -84,3 +84,12 @@ class OpenAliceClient:
             shown=result.get("shown"),
         )
         return result
+
+    async def read_rss(self, article_id: int) -> dict[str, Any]:
+        """Fetch a single full RSS article by stable id via readRss."""
+        logger.debug("openalice.read_rss.request", article_id=article_id)
+        result = await self.invoke("readRss", {"id": article_id})
+        if "error" in result:
+            raise OpenAliceError(f"readRss failed for id {article_id}: {result['error']}")
+        logger.debug("openalice.read_rss.response", article_id=article_id)
+        return result

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
@@ -32,6 +33,7 @@ class NewsFilterToolInput(BaseModel):
     limit: int = Field(default=100, ge=1)
     min_score: float = Field(default=0.6, ge=0.0, le=1.0)
     medium_score: float = Field(default=0.3, ge=0.0, le=1.0)
+    read_concurrency: int = Field(default=5, ge=1, le=20)
     pipeline_run_id: str | None = None
 
     @field_validator("medium_score")
@@ -48,6 +50,7 @@ class ScoredArticle(BaseModel):
     title: str
     source: str
     link: str
+    content: str = ""
     score: float | None = None
     reason: str | None = None
     error: str | None = None
@@ -121,6 +124,19 @@ class NewsFilterTool(BaseTool):
             if article_id not in seen_ids:
                 new_articles.append(article)
 
+        # Enrich new articles with full metadata via readRss.
+        semaphore = asyncio.Semaphore(params["read_concurrency"])
+        enriched_articles: list[dict[str, Any]] = []
+        async with asyncio.TaskGroup() as tg:
+            tasks = [
+                tg.create_task(self._enrich_article(client, article, semaphore))
+                for article in new_articles
+            ]
+        for task in tasks:
+            enriched = task.result()
+            if enriched is not None:
+                enriched_articles.append(enriched)
+
         high: list[ScoredArticle] = []
         medium_pending: list[ScoredArticle] = []
         degraded: list[ScoredArticle] = []
@@ -130,7 +146,7 @@ class NewsFilterTool(BaseTool):
         model, api_key, api_base, timeout = self._normalize_llm_settings(llm_cfg)
 
         try:
-            for article in new_articles:
+            for article in enriched_articles:
                 scored = await self._score_article(
                     article,
                     model=model,
@@ -248,25 +264,57 @@ class NewsFilterTool(BaseTool):
     _SOURCE_RE = re.compile(r'"source"\s*:\s*"([^"]*?)(?:"|$)')
     _LINK_RE = re.compile(r'"link"\s*:\s*"([^"]*?)(?:"|$)')
 
+    async def _enrich_article(
+        self,
+        client: OpenAliceClient,
+        article: dict[str, Any],
+        semaphore: asyncio.Semaphore,
+    ) -> dict[str, Any] | None:
+        """Fetch full article content via readRss to avoid truncated metadata."""
+        article_id = self._article_id(article)
+        if not article_id:
+            return None
+        try:
+            numeric_id = int(article_id)
+        except ValueError:
+            logger.warning("news_filter.invalid_article_id", article_id=article_id)
+            return None
+
+        async with semaphore:
+            try:
+                full = await client.read_rss(numeric_id)
+            except OpenAliceError as exc:
+                logger.warning(
+                    "news_filter.read_rss_failed",
+                    article_id=article_id,
+                    error=str(exc),
+                )
+                return None
+
+        # Merge: keep windowRss time/title, use readRss metadata (and content if present).
+        merged = dict(article)
+        merged["metadata"] = full.get("metadata", article.get("metadata", "{}"))
+        if "content" in full:
+            merged["content"] = full["content"]
+        return merged
+
     @staticmethod
     def _parse_article(article: dict[str, Any]) -> dict[str, Any]:
-        metadata_text = article.get("metadata", "{}")
-        if not isinstance(metadata_text, str):
-            metadata_text = json.dumps(metadata_text)
-
-        metadata: dict[str, Any] = {}
-        try:
-            metadata = json.loads(metadata_text)
-        except json.JSONDecodeError:
-            # The OpenAlice gateway sometimes truncates long links, leaving the
-            # metadata string invalid. Fall back to regex extraction so that at
-            # least the source (and a partial link) is preserved.
-            source_match = NewsFilterTool._SOURCE_RE.search(metadata_text)
-            link_match = NewsFilterTool._LINK_RE.search(metadata_text)
-            metadata = {
-                "source": source_match.group(1) if source_match else "",
-                "link": link_match.group(1) if link_match else "",
-            }
+        metadata_value = article.get("metadata", "{}")
+        if isinstance(metadata_value, dict):
+            metadata = metadata_value
+        else:
+            metadata_text = str(metadata_value)
+            try:
+                metadata = json.loads(metadata_text)
+            except json.JSONDecodeError:
+                # Fallback for truncated metadata from windowRss.
+                source_match = NewsFilterTool._SOURCE_RE.search(metadata_text)
+                link_match = NewsFilterTool._LINK_RE.search(metadata_text)
+                metadata = {
+                    "source": source_match.group(1) if source_match else "",
+                    "link": link_match.group(1) if link_match else "",
+                }
 
         return {
             "id": str(article.get("id", "")),
@@ -274,6 +322,7 @@ class NewsFilterTool(BaseTool):
             "title": str(article.get("title", "")),
             "source": str(metadata.get("source", "")),
             "link": str(metadata.get("link", "")),
+            "content": str(article.get("content", "")),
         }
 
     @retry(
@@ -346,6 +395,7 @@ class NewsFilterTool(BaseTool):
 
     @staticmethod
     def _build_prompt(article: dict[str, Any]) -> str:
+        content_preview = article["content"][:800] if article["content"] else ""
         return (
             "You are a crypto trading risk analyst. Rate the article's relevance to a "
             "short-term crypto trading decision and its potential to be a black-swan / "
@@ -354,7 +404,8 @@ class NewsFilterTool(BaseTool):
             f"Title: {article['title']}\n"
             f"Time: {article['time']}\n"
             f"Source: {article['source']}\n"
-            f"Link: {article['link']}"
+            f"Link: {article['link']}\n"
+            f"Content preview: {content_preview}"
         )
 
     @staticmethod

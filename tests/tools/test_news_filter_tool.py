@@ -20,12 +20,27 @@ def _write_config(tmp_path: Path) -> None:
 
 
 def _make_article(article_id: int, title: str, source: str = "scmp-business") -> dict:
+    """WindowRss-style article with truncated JSON-string metadata."""
     metadata = {"source": source, "link": f"https://example.com/{article_id}"}
     return {
         "id": article_id,
         "time": "2026-07-27T12:00:00Z",
         "title": title,
         "metadata": json.dumps(metadata),
+    }
+
+
+def _make_full_article(article_id: int, title: str, source: str = "scmp-business") -> dict:
+    """ReadRss-style full article with dict metadata."""
+    return {
+        "id": article_id,
+        "time": "2026-07-27T12:00:00Z",
+        "title": title,
+        "content": f"Full content for {title}",
+        "metadata": {
+            "source": source,
+            "link": f"https://example.com/{article_id}?utm_source=rss_feed&very_long_parameter=1",
+        },
     }
 
 
@@ -61,6 +76,13 @@ async def test_news_filter_scores_and_bins_articles(tmp_path: Path, monkeypatch)
     client = AsyncMock()
     client.window_rss = AsyncMock(
         return_value={"total": 3, "shown": 3, "omitted": 0, "results": articles}
+    )
+    client.read_rss = AsyncMock(
+        side_effect=[
+            _make_full_article(770, "Bitcoin ETF approved"),
+            _make_full_article(771, "Local bakery wins award"),
+            _make_full_article(772, "Exchange hack reported"),
+        ]
     )
 
     llm_responses = [
@@ -116,6 +138,12 @@ async def test_news_filter_bins_medium_pending(tmp_path: Path, monkeypatch):
     client.window_rss = AsyncMock(
         return_value={"total": 2, "shown": 2, "omitted": 0, "results": articles}
     )
+    client.read_rss = AsyncMock(
+        side_effect=[
+            _make_full_article(880, "Regulatory hearing next week"),
+            _make_full_article(881, "Stablecoin depeg rumors"),
+        ]
+    )
 
     responses = [
         _make_llm_response('{"score": 0.45, "reason": "Potential volatility"}'),
@@ -163,6 +191,7 @@ async def test_news_filter_llm_failure_notifies_and_fails(tmp_path: Path, monkey
     articles = [_make_article(990, "Major exploit")]
     client = AsyncMock()
     client.window_rss = AsyncMock(return_value={"total": 1, "results": articles})
+    client.read_rss = AsyncMock(return_value=_make_full_article(990, "Major exploit"))
     notifier = AsyncMock()
     notifier.send = AsyncMock(return_value={"pushplus": "ok"})
 
@@ -188,6 +217,7 @@ async def test_news_filter_skips_seen_articles(tmp_path: Path, monkeypatch):
     articles = [_make_article(100, "First article")]
     client = AsyncMock()
     client.window_rss = AsyncMock(return_value={"total": 1, "results": articles})
+    client.read_rss = AsyncMock(return_value=_make_full_article(100, "First article"))
 
     notifier = AsyncMock()
     tool = _build_tool(tmp_path, client, notifier)
@@ -221,6 +251,7 @@ async def test_news_filter_merges_watch_state(tmp_path: Path, monkeypatch):
     articles = [_make_article(200, "Merge test")]
     client = AsyncMock()
     client.window_rss = AsyncMock(return_value={"total": 1, "results": articles})
+    client.read_rss = AsyncMock(return_value=_make_full_article(200, "Merge test"))
 
     tool = _build_tool(tmp_path, client)
     with patch(
@@ -246,6 +277,75 @@ def test_parse_article_falls_back_to_regex_on_truncated_metadata():
     parsed = NewsFilterTool._parse_article(article)
     assert parsed["source"] == "cnbc-economy"
     assert parsed["link"].startswith("http://example.com/very-long-link-that-was-cut")
+
+
+@pytest.mark.unit
+def test_parse_article_uses_dict_metadata_directly():
+    article = {
+        "id": 888,
+        "time": "2026-07-27T10:00:00Z",
+        "title": "Full article",
+        "metadata": {
+            "source": "reuters",
+            "link": "https://reuters.com/article/12345?utm_source=rss",
+        },
+        "content": "Full text here",
+    }
+    parsed = NewsFilterTool._parse_article(article)
+    assert parsed["source"] == "reuters"
+    assert parsed["link"] == "https://reuters.com/article/12345?utm_source=rss"
+    assert parsed["content"] == "Full text here"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_news_filter_enriches_articles_with_read_rss(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_config(tmp_path)
+
+    articles = [_make_article(555, "Enrichment test")]
+    client = AsyncMock()
+    client.window_rss = AsyncMock(return_value={"total": 1, "results": articles})
+    full = _make_full_article(555, "Enrichment test")
+    client.read_rss = AsyncMock(return_value=full)
+
+    tool = _build_tool(tmp_path, client)
+    with patch(
+        "tools.news.news_filter_tool.litellm.acompletion",
+        new=AsyncMock(return_value=_make_llm_response('{"score": 0.5, "reason": "ok"}')),
+    ):
+        result = await tool.execute({"window_minutes": 60})
+
+    assert result.success is True
+    client.read_rss.assert_awaited_once_with(555)
+    scored = result.data["medium_pending"][0]
+    assert scored["link"] == full["metadata"]["link"]
+    assert scored["content"] == full["content"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_news_filter_read_rss_failure_skips_article(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_config(tmp_path)
+
+    articles = [_make_article(666, "Will fail enrichment")]
+    client = AsyncMock()
+    client.window_rss = AsyncMock(return_value={"total": 1, "results": articles})
+    client.read_rss = AsyncMock(side_effect=OpenAliceError("not found"))
+
+    tool = _build_tool(tmp_path, client)
+    with patch(
+        "tools.news.news_filter_tool.litellm.acompletion",
+        new=AsyncMock(return_value=_make_llm_response('{"score": 0.5, "reason": "ok"}')),
+    ):
+        result = await tool.execute({"window_minutes": 60})
+
+    assert result.success is True
+    assert result.data["new"] == 1
+    assert result.data["scored"] == 0
+    assert result.data["high"] == []
+    assert result.data["medium_pending"] == []
 
 
 @pytest.mark.unit
