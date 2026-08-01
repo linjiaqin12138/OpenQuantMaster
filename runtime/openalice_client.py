@@ -16,22 +16,36 @@ class OpenAliceError(RuntimeError):
 
 
 class OpenAliceClient:
-    """Async HTTP client for the OpenAlice CLI gateway."""
+    """Async HTTP client for the OpenAlice CLI gateway.
+
+    The gateway is OpenAlice's machine-facing surface (open posture, no auth —
+    the workspace CLI carries no secret). One invoke endpoint serves every
+    export: ``POST {cli_gateway_url}/cli/{workspace_id}/{export}/invoke`` with
+    body ``{"tool": <name>, "args": {...}}``; the response is an MCP-style
+    envelope whose ``content[0].text`` holds the JSON payload.
+    """
 
     def __init__(self, config: OpenAliceConfig, timeout: float = 30.0) -> None:
         self._config = config
         self._timeout = timeout
 
-    def _endpoint(self) -> str:
+    def _endpoint(self, export: str | None = None) -> str:
         base = self._config.cli_gateway_url.rstrip("/")
-        return f"{base}/cli/{self._config.workspace_id}/{self._config.export}/invoke"
+        exp = export or self._config.export
+        return f"{base}/cli/{self._config.workspace_id}/{exp}/invoke"
 
-    async def invoke(self, tool: str, args: dict[str, Any]) -> dict[str, Any]:
+    async def invoke(
+        self,
+        tool: str,
+        args: dict[str, Any],
+        export: str | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
         """Post a generic tool invocation and return the parsed inner JSON payload."""
         payload = {"tool": tool, "args": args}
-        url = self._endpoint()
+        url = self._endpoint(export)
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
+            async with httpx.AsyncClient(timeout=timeout or self._timeout) as client:
                 response = await client.post(url, json=payload)
                 response.raise_for_status()
                 body = response.json()
@@ -57,6 +71,50 @@ class OpenAliceClient:
             raise OpenAliceError("OpenAlice content text did not decode to a JSON object")
 
         return parsed
+
+    async def conversation_ask(
+        self,
+        prompt: str,
+        timeout_sec: float,
+        resume_id: str | None = None,
+        wait: bool = True,
+    ) -> dict[str, Any]:
+        """Invoke the agent via the workspace export's conversation_ask tool.
+
+        Returns the raw result dict; callers must interpret ``ok``/``status``
+        (success is ``ok and status == "done"``; a stale resumeId comes back as
+        ``{"ok": False, "status": "unavailable"}``).
+        """
+        args: dict[str, Any] = {
+            "prompt": prompt,
+            "timeoutMs": int(timeout_sec * 1000),
+            "await": wait,
+        }
+        if resume_id:
+            args["resumeId"] = resume_id
+        else:
+            args["wsId"] = self._config.workspace_id
+
+        logger.debug(
+            "openalice.conversation_ask.request",
+            resume_id=resume_id,
+            wait=wait,
+            timeout_sec=timeout_sec,
+        )
+        # await:true blocks server-side up to timeoutMs; give the HTTP call headroom.
+        result = await self.invoke(
+            "conversation_ask",
+            args,
+            export="workspace",
+            timeout=(timeout_sec + 30.0) if wait else self._timeout,
+        )
+        logger.debug(
+            "openalice.conversation_ask.response",
+            ok=result.get("ok"),
+            status=result.get("status"),
+            task_id=result.get("taskId"),
+        )
+        return result
 
     async def window_rss(
         self,
