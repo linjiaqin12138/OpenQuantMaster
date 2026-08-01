@@ -16,6 +16,7 @@ from runtime.state_store.database import StateStore
 from tools.agent.agent_tool import AgentTool
 from tools.base.tool_registry import ToolRegistry
 from tools.notifier.notify_tool import NotifyTool
+from tools.runtime.parallel_tool import ParallelTool
 
 logger = structlog.get_logger()
 
@@ -87,6 +88,7 @@ async def bootstrap(config_path: Path | str | None = None, package: ModuleType |
             AgentTool(agent_driver=agent_driver, artifacts_path=config.paths.artifacts)
         )
         registry.register(NotifyTool(notifier=notifier))
+        registry.register(ParallelTool(registry=registry))
         runner = PipelineRunner(
             config=config,
             store=store,

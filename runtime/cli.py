@@ -10,6 +10,16 @@ from runtime.config_loader import load_config
 from runtime.daemon import Daemon
 from runtime.logging_config import configure_logging
 from tools.base.tool_registry import ToolRegistry
+from tools.runtime.parallel_tool import ParallelTool
+
+
+def _build_registry() -> ToolRegistry:
+    import tools
+
+    registry = ToolRegistry()
+    registry.discover(tools)
+    registry.register(ParallelTool(registry=registry))
+    return registry
 
 
 @click.group()
@@ -37,12 +47,9 @@ def run_pipeline(pipeline_name: str, config_path: Path | None) -> None:
 @click.option("--inputs", default="{}", help="JSON-encoded inputs for the tool.")
 @click.option("--config", "config_path", type=click.Path(path_type=Path), help="Path to config.yaml.")
 def tool(tool_name: str, inputs: str, config_path: Path | None) -> None:
-    import tools
-
     cfg = load_config(config_path)
     configure_logging(cfg)
-    registry = ToolRegistry()
-    registry.discover(tools)
+    registry = _build_registry()
     discovered_tool = registry.get(tool_name)
     parsed = json.loads(inputs)
     result = asyncio.run(discovered_tool.execute(parsed))
@@ -58,10 +65,7 @@ def tool(tool_name: str, inputs: str, config_path: Path | None) -> None:
     help="Output format.",
 )
 def list_tools(fmt: str) -> None:
-    import tools
-
-    registry = ToolRegistry()
-    registry.discover(tools)
+    registry = _build_registry()
     rows = []
     for name in registry.list_tools():
         tool = registry.get(name)
