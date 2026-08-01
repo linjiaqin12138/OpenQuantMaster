@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -115,6 +115,7 @@ class OpenAliceConfig(BaseModel):
     workspace_id: str = "auto-quant-clear-willow-field"
     cli_gateway_url: str = "http://127.0.0.1:47332"
     export: str = "data"
+    default_timeout: int = 300
 
 
 class LLMConfig(BaseModel):
@@ -125,10 +126,30 @@ class LLMConfig(BaseModel):
     timeout: int = 30
 
 
-class ToolConfig(BaseModel):
-    """Per-tool configuration overrides. Currently only supports LLM."""
+class BaseToolConfig(BaseModel):
+    """Base class for per-tool configuration.
 
+    Deliberately empty: each tool subclasses it and declares only the fields
+    it needs. Register subclasses in ``TOOL_CONFIG_MODELS`` so the ``tools:``
+    block in config.yaml is dispatched to the right model at load time.
+    """
+
+
+class NewsFilterPromptConfig(BaseModel):
+    """Prompt template override for news_filter_tool."""
+
+    template: str = ""  # empty → tool falls back to its built-in default
+
+
+class NewsFilterToolConfig(BaseToolConfig):
     llm: LLMConfig | None = None
+    prompt: NewsFilterPromptConfig | None = None
+    batch_size: int = 1  # articles scored per LLM call
+
+
+TOOL_CONFIG_MODELS: dict[str, type[BaseToolConfig]] = {
+    "news_filter_tool": NewsFilterToolConfig,
+}
 
 
 class RuntimeConfig(BaseSettings):
@@ -151,8 +172,25 @@ class RuntimeConfig(BaseSettings):
     notifier: NotifierConfig = Field(default_factory=NotifierConfig)
     openalice: OpenAliceConfig = Field(default_factory=OpenAliceConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
-    tools: dict[str, ToolConfig] = Field(default_factory=dict)
+    tools: dict[str, BaseToolConfig] = Field(default_factory=dict)
     config_path: Path | None = None
+
+    @field_validator("tools", mode="before")
+    @classmethod
+    def _dispatch_tool_configs(cls, value: Any) -> Any:
+        """Instantiate each tool's config with its registered model."""
+        if not isinstance(value, dict):
+            return value
+        dispatched: dict[str, Any] = {}
+        for name, raw in value.items():
+            model = TOOL_CONFIG_MODELS.get(name)
+            if model is None:
+                raise ValueError(
+                    f"unknown tool '{name}' in `tools:` config; "
+                    f"registered: {sorted(TOOL_CONFIG_MODELS)}"
+                )
+            dispatched[name] = raw if isinstance(raw, BaseToolConfig) else model(**raw)
+        return dispatched
 
     @property
     def database_url(self) -> str:
@@ -163,16 +201,17 @@ def get_llm_config(cfg: RuntimeConfig, tool_name: str) -> LLMConfig:
     """Resolve the effective LLM config for a tool.
 
     Starts from the global ``cfg.llm`` and merges any per-tool overrides
-    declared under ``cfg.tools[tool_name].llm``. Only fields explicitly set
-    in the override (via YAML or environment variables) replace the defaults;
+    declared under ``cfg.tools[tool_name].llm`` (only tools whose config
+    model declares an ``llm`` field). Only fields explicitly set in the
+    override (via YAML or environment variables) replace the defaults;
     unset fields inherit the global values.
     """
     tool_cfg = cfg.tools.get(tool_name)
-    if tool_cfg is None or tool_cfg.llm is None:
+    override = getattr(tool_cfg, "llm", None)
+    if override is None:
         return cfg.llm
 
     base = cfg.llm.model_dump()
-    override = tool_cfg.llm
     for field in override.model_fields_set:
         base[field] = getattr(override, field)
     return LLMConfig(**base)

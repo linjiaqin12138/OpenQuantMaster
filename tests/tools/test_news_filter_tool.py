@@ -86,8 +86,8 @@ async def test_news_filter_scores_and_bins_articles(tmp_path: Path, monkeypatch)
     )
 
     llm_responses = [
-        _make_llm_response('{"score": 0.85, "reason": "ETF approval is bullish"}'),
-        _make_llm_response('{"score": 0.2, "reason": "Not relevant"}'),
+        _make_llm_response('{"ratings": [{"id": "770", "score": 0.85, "reason": "ETF approval is bullish"}]}'),
+        _make_llm_response('{"ratings": [{"id": "771", "score": 0.2, "reason": "Not relevant"}]}'),
         _make_llm_response("not valid json"),
     ]
 
@@ -109,7 +109,7 @@ async def test_news_filter_scores_and_bins_articles(tmp_path: Path, monkeypatch)
     assert len(data["medium_pending"]) == 0
     assert len(data["degraded"]) == 1
     assert data["degraded"][0]["id"] == "772"
-    assert "LLM parse error" in data["degraded"][0]["error"]
+    assert "LLM batch parse error" in data["degraded"][0]["error"]
 
     state_path = tmp_path / "watch_state.json"
     assert state_path.exists()
@@ -146,8 +146,8 @@ async def test_news_filter_bins_medium_pending(tmp_path: Path, monkeypatch):
     )
 
     responses = [
-        _make_llm_response('{"score": 0.45, "reason": "Potential volatility"}'),
-        _make_llm_response('{"score": 0.75, "reason": "Depeg risk"}'),
+        _make_llm_response('{"ratings": [{"id": "880", "score": 0.45, "reason": "Potential volatility"}]}'),
+        _make_llm_response('{"ratings": [{"id": "881", "score": 0.75, "reason": "Depeg risk"}]}'),
     ]
 
     tool = _build_tool(tmp_path, client)
@@ -225,7 +225,7 @@ async def test_news_filter_skips_seen_articles(tmp_path: Path, monkeypatch):
     with patch(
         "tools.news.news_filter_tool.litellm.acompletion",
         new=AsyncMock(
-            return_value=_make_llm_response('{"score": 0.9, "reason": "Big news"}')
+            return_value=_make_llm_response('{"ratings": [{"id": "100", "score": 0.9, "reason": "Big news"}]}')
         ),
     ):
         first = await tool.execute({"window_minutes": 60})
@@ -256,7 +256,7 @@ async def test_news_filter_merges_watch_state(tmp_path: Path, monkeypatch):
     tool = _build_tool(tmp_path, client)
     with patch(
         "tools.news.news_filter_tool.litellm.acompletion",
-        new=AsyncMock(return_value=_make_llm_response('{"score": 0.95, "reason": "Merge"}')),
+        new=AsyncMock(return_value=_make_llm_response('{"ratings": [{"id": "200", "score": 0.95, "reason": "Merge"}]}')),
     ):
         result = await tool.execute({"window_minutes": 60})
 
@@ -264,6 +264,301 @@ async def test_news_filter_merges_watch_state(tmp_path: Path, monkeypatch):
     state = json.loads((tmp_path / "watch_state.json").read_text(encoding="utf-8"))
     assert state["other_tool"]["counter"] == 5
     assert "200" in state["news_filter"]["seen_ids"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_news_filter_uses_config_prompt_template(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.yaml").write_text(
+        "app_name: OpenQuantMaster\n"
+        "environment: testing\n"
+        "tools:\n"
+        "  news_filter_tool:\n"
+        "    prompt:\n"
+        "      template: |\n"
+        "        You are a U.S. equities risk analyst. Return ONLY JSON.\n"
+        "        {articles}\n",
+        encoding="utf-8",
+    )
+
+    articles = [_make_article(301, "Fed raises rates")]
+    client = AsyncMock()
+    client.window_rss = AsyncMock(return_value={"total": 1, "results": articles})
+    client.read_rss = AsyncMock(return_value=_make_full_article(301, "Fed raises rates"))
+
+    mock_llm = AsyncMock(
+        return_value=_make_llm_response('{"ratings": [{"id": "301", "score": 0.8, "reason": "Macro event"}]}')
+    )
+    tool = _build_tool(tmp_path, client)
+    with patch("tools.news.news_filter_tool.litellm.acompletion", new=mock_llm):
+        result = await tool.execute({"window_minutes": 60})
+
+    assert result.success is True
+    prompt = mock_llm.await_args.kwargs["messages"][0]["content"]
+    assert "U.S. equities risk analyst" in prompt
+    assert "crypto trading risk analyst" not in prompt
+    assert "Title: Fed raises rates" in prompt
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_news_filter_input_prompt_template_overrides_config(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.yaml").write_text(
+        "app_name: OpenQuantMaster\n"
+        "environment: testing\n"
+        "tools:\n"
+        "  news_filter_tool:\n"
+        "    prompt:\n"
+        "      template: 'config template {articles}'\n",
+        encoding="utf-8",
+    )
+
+    articles = [_make_article(302, "Override test")]
+    client = AsyncMock()
+    client.window_rss = AsyncMock(return_value={"total": 1, "results": articles})
+    client.read_rss = AsyncMock(return_value=_make_full_article(302, "Override test"))
+
+    mock_llm = AsyncMock(
+        return_value=_make_llm_response('{"ratings": [{"id": "302", "score": 0.9, "reason": "ok"}]}')
+    )
+    tool = _build_tool(tmp_path, client)
+    with patch("tools.news.news_filter_tool.litellm.acompletion", new=mock_llm):
+        result = await tool.execute(
+            {"window_minutes": 60, "prompt_template": "input template {articles}"}
+        )
+
+    assert result.success is True
+    prompt = mock_llm.await_args.kwargs["messages"][0]["content"]
+    assert prompt.startswith("input template ")
+    assert "[Article id=302]" in prompt
+    assert "Title: Override test" in prompt
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_news_filter_unknown_placeholder_fails_loud(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_config(tmp_path)
+
+    client = AsyncMock()
+    mock_llm = AsyncMock()
+    tool = _build_tool(tmp_path, client)
+    with patch("tools.news.news_filter_tool.litellm.acompletion", new=mock_llm):
+        result = await tool.execute(
+            {"window_minutes": 60, "prompt_template": "Rate this {summary} article {title}"}
+        )
+
+    assert result.success is False
+    assert "summary" in result.error
+    assert "unknown placeholder" in result.error
+    client.window_rss.assert_not_awaited()
+    mock_llm.assert_not_awaited()
+
+
+def _make_batch_response(ratings: list[tuple[str, float, str]]) -> MagicMock:
+    payload = {"ratings": [{"id": i, "score": s, "reason": r} for i, s, r in ratings]}
+    return _make_llm_response(json.dumps(payload))
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_news_filter_batches_articles(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_config(tmp_path)
+
+    articles = [_make_article(900 + i, f"Batch article {i}") for i in range(1, 13)]
+    client = AsyncMock()
+    client.window_rss = AsyncMock(
+        return_value={"total": 12, "shown": 12, "omitted": 0, "results": articles}
+    )
+    client.read_rss = AsyncMock(
+        side_effect=[_make_full_article(900 + i, f"Batch article {i}") for i in range(1, 13)]
+    )
+
+    mock_llm = AsyncMock(
+        side_effect=[
+            _make_batch_response(
+                [("901", 0.9, "high")] + [(str(900 + i), 0.1, "low") for i in range(2, 6)]
+            ),
+            _make_batch_response(
+                [("907", 0.5, "medium")] + [(str(900 + i), 0.1, "low") for i in (6, 8, 9, 10)]
+            ),
+            _make_batch_response([(str(900 + i), 0.1, "low") for i in range(11, 13)]),
+        ]
+    )
+    tool = _build_tool(tmp_path, client)
+    with patch("tools.news.news_filter_tool.litellm.acompletion", new=mock_llm):
+        result = await tool.execute({"window_minutes": 60, "batch_size": 5})
+
+    assert result.success is True
+    assert mock_llm.await_count == 3  # ceil(12 / 5)
+    data = result.data
+    assert data["scored"] == 12
+    assert [a["id"] for a in data["high"]] == ["901"]
+    assert [a["id"] for a in data["medium_pending"]] == ["907"]
+
+    first_prompt = mock_llm.await_args_list[0].kwargs["messages"][0]["content"]
+    assert "[Article id=901]" in first_prompt
+    assert "[Article id=905]" in first_prompt
+    assert "Articles (5)" in first_prompt
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_news_filter_batch_missing_id_degraded(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_config(tmp_path)
+
+    articles = [_make_article(950 + i, f"Missing id {i}") for i in range(3)]
+    client = AsyncMock()
+    client.window_rss = AsyncMock(return_value={"total": 3, "results": articles})
+    client.read_rss = AsyncMock(
+        side_effect=[_make_full_article(950 + i, f"Missing id {i}") for i in range(3)]
+    )
+
+    mock_llm = AsyncMock(
+        return_value=_make_batch_response([("950", 0.9, "high"), ("952", 0.8, "high")])
+    )
+    tool = _build_tool(tmp_path, client)
+    with patch("tools.news.news_filter_tool.litellm.acompletion", new=mock_llm):
+        result = await tool.execute({"window_minutes": 60, "batch_size": 5})
+
+    assert result.success is True
+    data = result.data
+    assert data["scored"] == 2
+    assert {a["id"] for a in data["high"]} == {"950", "952"}
+    assert len(data["degraded"]) == 1
+    assert data["degraded"][0]["id"] == "951"
+    assert "missing from LLM batch response" in data["degraded"][0]["error"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_news_filter_batch_parse_error_degrades_whole_batch(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_config(tmp_path)
+
+    articles = [_make_article(960 + i, f"Parse error {i}") for i in range(4)]
+    client = AsyncMock()
+    client.window_rss = AsyncMock(return_value={"total": 4, "results": articles})
+    client.read_rss = AsyncMock(
+        side_effect=[_make_full_article(960 + i, f"Parse error {i}") for i in range(4)]
+    )
+
+    mock_llm = AsyncMock(return_value=_make_llm_response("totally not json"))
+    tool = _build_tool(tmp_path, client)
+    with patch("tools.news.news_filter_tool.litellm.acompletion", new=mock_llm):
+        result = await tool.execute({"window_minutes": 60, "batch_size": 5})
+
+    assert result.success is True
+    data = result.data
+    assert data["scored"] == 0
+    assert len(data["degraded"]) == 4
+    assert all("LLM batch parse error" in a["error"] for a in data["degraded"])
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_news_filter_batch_size_from_config(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.yaml").write_text(
+        "app_name: OpenQuantMaster\n"
+        "environment: testing\n"
+        "tools:\n"
+        "  news_filter_tool:\n"
+        "    batch_size: 5\n",
+        encoding="utf-8",
+    )
+
+    articles = [_make_article(970 + i, f"Config batch {i}") for i in range(7)]
+    client = AsyncMock()
+    client.window_rss = AsyncMock(return_value={"total": 7, "results": articles})
+    client.read_rss = AsyncMock(
+        side_effect=[_make_full_article(970 + i, f"Config batch {i}") for i in range(7)]
+    )
+
+    mock_llm = AsyncMock(
+        side_effect=[
+            _make_batch_response([(str(970 + i), 0.1, "low") for i in range(5)]),
+            _make_batch_response([(str(970 + i), 0.1, "low") for i in range(5, 7)]),
+        ]
+    )
+    tool = _build_tool(tmp_path, client)
+    with patch("tools.news.news_filter_tool.litellm.acompletion", new=mock_llm):
+        result = await tool.execute({"window_minutes": 60})
+
+    assert result.success is True
+    assert mock_llm.await_count == 2  # ceil(7 / 5), batch_size from config
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_news_filter_input_batch_size_overrides_config(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.yaml").write_text(
+        "app_name: OpenQuantMaster\n"
+        "environment: testing\n"
+        "tools:\n"
+        "  news_filter_tool:\n"
+        "    batch_size: 5\n",
+        encoding="utf-8",
+    )
+
+    articles = [_make_article(980 + i, f"Override batch {i}") for i in range(5)]
+    client = AsyncMock()
+    client.window_rss = AsyncMock(return_value={"total": 5, "results": articles})
+    client.read_rss = AsyncMock(
+        side_effect=[_make_full_article(980 + i, f"Override batch {i}") for i in range(5)]
+    )
+
+    mock_llm = AsyncMock(
+        side_effect=[
+            _make_batch_response([(str(980 + i), 0.1, "low") for i in range(2)]),
+            _make_batch_response([(str(980 + i), 0.1, "low") for i in range(2, 4)]),
+            _make_batch_response([("984", 0.1, "low")]),
+        ]
+    )
+    tool = _build_tool(tmp_path, client)
+    with patch("tools.news.news_filter_tool.litellm.acompletion", new=mock_llm):
+        result = await tool.execute({"window_minutes": 60, "batch_size": 2})
+
+    assert result.success is True
+    assert mock_llm.await_count == 3  # ceil(5 / 2), input overrides config batch_size=5
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_news_filter_custom_batch_template_renders_all_articles(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_config(tmp_path)
+
+    articles = [_make_article(990 + i, f"Template {i}") for i in range(2)]
+    client = AsyncMock()
+    client.window_rss = AsyncMock(return_value={"total": 2, "results": articles})
+    client.read_rss = AsyncMock(
+        side_effect=[_make_full_article(990 + i, f"Template {i}") for i in range(2)]
+    )
+
+    mock_llm = AsyncMock(
+        return_value=_make_batch_response([("990", 0.9, "a"), ("991", 0.2, "b")])
+    )
+    tool = _build_tool(tmp_path, client)
+    with patch("tools.news.news_filter_tool.litellm.acompletion", new=mock_llm):
+        result = await tool.execute(
+            {
+                "window_minutes": 60,
+                "batch_size": 5,
+                "prompt_template": "Custom equities template, {count} items:\n{articles}",
+            }
+        )
+
+    assert result.success is True
+    prompt = mock_llm.await_args.kwargs["messages"][0]["content"]
+    assert prompt.startswith("Custom equities template, 2 items:")
+    assert "[Article id=990]" in prompt
+    assert "[Article id=991]" in prompt
 
 
 @pytest.mark.unit
@@ -312,7 +607,7 @@ async def test_news_filter_enriches_articles_with_read_rss(tmp_path: Path, monke
     tool = _build_tool(tmp_path, client)
     with patch(
         "tools.news.news_filter_tool.litellm.acompletion",
-        new=AsyncMock(return_value=_make_llm_response('{"score": 0.5, "reason": "ok"}')),
+        new=AsyncMock(return_value=_make_llm_response('{"ratings": [{"id": "555", "score": 0.5, "reason": "ok"}]}')),
     ):
         result = await tool.execute({"window_minutes": 60})
 
@@ -425,12 +720,12 @@ def test_get_llm_config_returns_global_default():
 
 @pytest.mark.unit
 def test_get_llm_config_tool_override_merges():
-    from runtime.config_loader import LLMConfig, RuntimeConfig, ToolConfig
+    from runtime.config_loader import LLMConfig, NewsFilterToolConfig, RuntimeConfig
 
     cfg = RuntimeConfig(
         llm=LLMConfig(model="gpt-4o-mini", timeout=30, api_key="default-key"),
         tools={
-            "news_filter_tool": ToolConfig(
+            "news_filter_tool": NewsFilterToolConfig(
                 llm=LLMConfig(model="anthropic/claude-3-5-sonnet-20241022", timeout=15)
             )
         },
@@ -442,17 +737,51 @@ def test_get_llm_config_tool_override_merges():
 
 
 @pytest.mark.unit
-def test_get_llm_config_tool_override_ignores_other_tools():
-    from runtime.config_loader import LLMConfig, RuntimeConfig, ToolConfig
+def test_get_llm_config_falls_back_for_tool_without_override():
+    from runtime.config_loader import LLMConfig, RuntimeConfig
 
     cfg = RuntimeConfig(
         llm=LLMConfig(model="gpt-4o-mini"),
-        tools={
-            "other_tool": ToolConfig(llm=LLMConfig(model="other-model"))
-        },
+        tools={"news_filter_tool": {"llm": {"model": "other-model"}}},
     )
-    resolved = get_llm_config(cfg, "news_filter_tool")
-    assert resolved.model == "gpt-4o-mini"
+    # Raw dicts are dispatched to the registered model at load time.
+    assert get_llm_config(cfg, "news_filter_tool").model == "other-model"
+    # Tools without a config entry (or without an `llm` field) get the global default.
+    assert get_llm_config(cfg, "unregistered_tool").model == "gpt-4o-mini"
+
+
+@pytest.mark.unit
+def test_tools_block_dispatches_to_registered_model():
+    from runtime.config_loader import NewsFilterToolConfig, RuntimeConfig
+
+    cfg = RuntimeConfig(
+        tools={"news_filter_tool": {"prompt": {"template": "custom {title}"}}}
+    )
+    tool_cfg = cfg.tools["news_filter_tool"]
+    assert isinstance(tool_cfg, NewsFilterToolConfig)
+    assert tool_cfg.prompt.template == "custom {title}"
+
+
+@pytest.mark.unit
+def test_tools_block_unknown_tool_raises():
+    from pydantic import ValidationError
+
+    from runtime.config_loader import RuntimeConfig
+
+    with pytest.raises(ValidationError, match="unknown_tool"):
+        RuntimeConfig(tools={"unknown_tool": {"llm": {"model": "x"}}})
+
+
+@pytest.mark.unit
+def test_tools_prompt_template_env_override(monkeypatch):
+    from runtime.config_loader import RuntimeConfig
+
+    monkeypatch.setenv(
+        "QUANT_AGENT_TOOLS__NEWS_FILTER_TOOL__PROMPT__TEMPLATE",
+        "env template {title}",
+    )
+    cfg = RuntimeConfig()
+    assert cfg.tools["news_filter_tool"].prompt.template == "env template {title}"
 
 
 @pytest.mark.unit

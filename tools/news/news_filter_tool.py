@@ -34,6 +34,8 @@ class NewsFilterToolInput(BaseModel):
     min_score: float = Field(default=0.6, ge=0.0, le=1.0)
     medium_score: float = Field(default=0.3, ge=0.0, le=1.0)
     read_concurrency: int = Field(default=5, ge=1, le=20)
+    batch_size: int | None = Field(default=None, ge=1, le=50)
+    prompt_template: str | None = None
     pipeline_run_id: str | None = None
 
     @field_validator("medium_score")
@@ -75,6 +77,21 @@ class NewsFilterTool(BaseTool):
     input_model: ClassVar[type[BaseModel]] = NewsFilterToolInput
     output_model: ClassVar[type[BaseModel]] = NewsFilterToolOutput
 
+    DEFAULT_PROMPT_TEMPLATE: ClassVar[str] = (
+        "You are a crypto trading risk analyst. Rate EACH article's relevance to a "
+        "short-term crypto trading decision and its potential to be a black-swan / "
+        "tail-risk event. Return ONLY JSON: "
+        '{"ratings": [{"id": string, "score": float 0-1, "reason": string}, ...]} '
+        "with exactly one entry per article, keyed by the article id given below. "
+        "0 = irrelevant, 1 = extremely urgent black swan.\n\n"
+        "Articles ({count}):\n{articles}"
+    )
+    PROMPT_PLACEHOLDERS: ClassVar[tuple[str, ...]] = (
+        "count",
+        "articles",
+    )
+    _PLACEHOLDER_RE: ClassVar[re.Pattern[str]] = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
     def __init__(
         self,
         artifacts_path: Path | str | None = None,
@@ -93,6 +110,15 @@ class NewsFilterTool(BaseTool):
 
         run_id = params.get("pipeline_run_id") or str(uuid.uuid4())
         cfg = self._load_config()
+
+        prompt_template = self._resolve_prompt_template(cfg, params.get("prompt_template"))
+        template_error = self._template_error(prompt_template)
+        if template_error:
+            logger.error("news_filter.invalid_prompt_template", error=template_error)
+            return ToolResult(success=False, error=template_error)
+
+        batch_size = self._resolve_batch_size(cfg, params.get("batch_size"))
+
         artifacts_path = self._artifacts_path or cfg.paths.artifacts
         watch_state_path = self._watch_state_path or Path(cfg.paths.database).parent / "watch_state.json"
 
@@ -146,25 +172,28 @@ class NewsFilterTool(BaseTool):
         model, api_key, api_base, timeout = self._normalize_llm_settings(llm_cfg)
 
         try:
-            for article in enriched_articles:
-                scored = await self._score_article(
-                    article,
+            for i in range(0, len(enriched_articles), batch_size):
+                batch = enriched_articles[i : i + batch_size]
+                scored_batch = await self._score_batch(
+                    batch,
                     model=model,
                     api_key=api_key,
                     api_base=api_base,
                     timeout=timeout,
+                    prompt_template=prompt_template,
                 )
-                if scored.error:
-                    degraded.append(scored)
-                    continue
+                for scored in scored_batch:
+                    if scored.error:
+                        degraded.append(scored)
+                        continue
 
-                scored_count += 1
-                if scored.score is None:
-                    continue
-                if scored.score >= params["min_score"]:
-                    high.append(scored)
-                elif scored.score >= params["medium_score"]:
-                    medium_pending.append(scored)
+                    scored_count += 1
+                    if scored.score is None:
+                        continue
+                    if scored.score >= params["min_score"]:
+                        high.append(scored)
+                    elif scored.score >= params["medium_score"]:
+                        medium_pending.append(scored)
         except Exception as exc:
             logger.error("news_filter.llm_failed", error=str(exc))
             await self._notify_failure(notifier, exc)
@@ -252,6 +281,36 @@ class NewsFilterTool(BaseTool):
         section["last_run_at"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    def _resolve_prompt_template(self, cfg: RuntimeConfig, override: str | None) -> str:
+        """Resolve prompt template: tool inputs > config tools block > built-in default."""
+        if override and override.strip():
+            return override
+        tool_cfg = cfg.tools.get(self.name)
+        if tool_cfg and tool_cfg.prompt and tool_cfg.prompt.template.strip():
+            return tool_cfg.prompt.template
+        return self.DEFAULT_PROMPT_TEMPLATE
+
+    def _resolve_batch_size(self, cfg: RuntimeConfig, override: int | None) -> int:
+        """Resolve batch size: tool inputs > config tools block > default (1)."""
+        if override is not None:
+            return override
+        tool_cfg = cfg.tools.get(self.name)
+        batch_size = getattr(tool_cfg, "batch_size", None)
+        if isinstance(batch_size, int) and batch_size >= 1:
+            return batch_size
+        return 1
+
+    @classmethod
+    def _template_error(cls, template: str) -> str | None:
+        """Return an error message if the template uses unknown placeholders."""
+        unknown = set(cls._PLACEHOLDER_RE.findall(template)) - set(cls.PROMPT_PLACEHOLDERS)
+        if unknown:
+            return (
+                f"unknown placeholder(s) {sorted(unknown)} in prompt template; "
+                f"allowed placeholders: {list(cls.PROMPT_PLACEHOLDERS)}"
+            )
+        return None
 
     @staticmethod
     def _normalize_llm_settings(llm_cfg: Any) -> tuple[str, str | None, str | None, float]:
@@ -349,16 +408,17 @@ class NewsFilterTool(BaseTool):
             timeout=timeout,
         )
 
-    async def _score_article(
+    async def _score_batch(
         self,
-        article: dict[str, Any],
+        articles: list[dict[str, Any]],
         model: str,
         api_key: str | None,
         api_base: str | None,
         timeout: float,
-    ) -> ScoredArticle:
-        parsed = self._parse_article(article)
-        prompt = self._build_prompt(parsed)
+        prompt_template: str,
+    ) -> list[ScoredArticle]:
+        parsed_batch = [self._parse_article(article) for article in articles]
+        prompt = self._build_prompt(parsed_batch, prompt_template)
 
         # This call retries via tenacity. If it ultimately fails, the exception
         # propagates and the whole tool fails loudly (no keyword fallback).
@@ -372,44 +432,60 @@ class NewsFilterTool(BaseTool):
         content = response.choices[0].message.content
 
         try:
-            score, reason = self._parse_score_response(content)
+            ratings = self._parse_batch_response(content)
         except Exception as exc:
             logger.warning(
-                "news_filter.score_parse_failed",
-                article_id=parsed["id"],
+                "news_filter.batch_parse_failed",
+                article_ids=[p["id"] for p in parsed_batch],
                 error=str(exc),
             )
-            return ScoredArticle(
-                **parsed,
-                score=None,
-                reason=None,
-                error=f"LLM parse error: {exc}",
+            return [
+                ScoredArticle(
+                    **parsed,
+                    score=None,
+                    reason=None,
+                    error=f"LLM batch parse error: {exc}",
+                )
+                for parsed in parsed_batch
+            ]
+
+        results: list[ScoredArticle] = []
+        for parsed in parsed_batch:
+            rating = ratings.get(parsed["id"])
+            if rating is None:
+                results.append(
+                    ScoredArticle(
+                        **parsed,
+                        score=None,
+                        reason=None,
+                        error="missing from LLM batch response",
+                    )
+                )
+                continue
+            score, reason = rating
+            results.append(ScoredArticle(**parsed, score=score, reason=reason, error=None))
+        return results
+
+    @classmethod
+    def _build_prompt(cls, articles: list[dict[str, Any]], template: str) -> str:
+        blocks = []
+        for article in articles:
+            content_preview = article["content"][:800] if article["content"] else ""
+            blocks.append(
+                f"[Article id={article['id']}]\n"
+                f"Title: {article['title']}\n"
+                f"Time: {article['time']}\n"
+                f"Source: {article['source']}\n"
+                f"Link: {article['link']}\n"
+                f"Content preview: {content_preview}"
             )
-
-        return ScoredArticle(
-            **parsed,
-            score=score,
-            reason=reason,
-            error=None,
+        return template.replace("{count}", str(len(articles))).replace(
+            "{articles}", "\n\n".join(blocks)
         )
 
     @staticmethod
-    def _build_prompt(article: dict[str, Any]) -> str:
-        content_preview = article["content"][:800] if article["content"] else ""
-        return (
-            "You are a crypto trading risk analyst. Rate the article's relevance to a "
-            "short-term crypto trading decision and its potential to be a black-swan / "
-            "tail-risk event. Return ONLY JSON: "
-            '{"score": float 0-1, "reason": string}. 0 = irrelevant, 1 = extremely urgent black swan.\n\n'
-            f"Title: {article['title']}\n"
-            f"Time: {article['time']}\n"
-            f"Source: {article['source']}\n"
-            f"Link: {article['link']}\n"
-            f"Content preview: {content_preview}"
-        )
-
-    @staticmethod
-    def _parse_score_response(content: str | None) -> tuple[float, str]:
+    def _parse_batch_response(content: str | None) -> dict[str, tuple[float, str]]:
+        """Parse the LLM batch response into an id → (score, reason) mapping."""
         if not isinstance(content, str):
             raise ValueError("LLM response content is empty")
 
@@ -427,15 +503,23 @@ class NewsFilterTool(BaseTool):
         if not isinstance(parsed, dict):
             raise ValueError("LLM response is not a JSON object")
 
-        score = parsed.get("score")
-        reason = parsed.get("reason")
-        if not isinstance(score, (int, float)):
-            raise ValueError("LLM response missing numeric 'score'")
-        if not isinstance(reason, str):
-            reason = str(reason) if reason is not None else ""
+        ratings = parsed.get("ratings")
+        if not isinstance(ratings, list):
+            raise ValueError("LLM response missing 'ratings' array")
 
-        score = max(0.0, min(1.0, float(score)))
-        return score, reason
+        result: dict[str, tuple[float, str]] = {}
+        for entry in ratings:
+            if not isinstance(entry, dict):
+                raise ValueError("LLM response 'ratings' entry is not an object")
+            article_id = entry.get("id")
+            score = entry.get("score")
+            if article_id is None or not isinstance(score, (int, float)):
+                raise ValueError("LLM response 'ratings' entry missing 'id' or numeric 'score'")
+            reason = entry.get("reason")
+            if not isinstance(reason, str):
+                reason = str(reason) if reason is not None else ""
+            result[str(article_id)] = (max(0.0, min(1.0, float(score))), reason)
+        return result
 
     async def _notify_failure(self, notifier: Any, exc: Exception) -> None:
         try:

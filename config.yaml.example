@@ -1,0 +1,111 @@
+app_name: OpenQuantMaster
+environment: development
+
+paths:
+  artifacts: ./artifacts
+  logs: ./logs
+  database: ./data/runtime.db
+  pipelines: ./pipelines
+
+scheduler:
+  timezone: UTC
+
+event_bus:
+  backend: memory
+
+logging:
+  level: INFO
+  format: json
+
+market_data:
+  crypto:
+    default_exchange: binance
+    sandbox: false
+    exchange_keys: {}
+  equities:
+    tushare_token: ""
+    yfinance_timeout: 30
+
+vibe_trading:
+  mode: cli
+  cli_path: vibe-trading
+  mcp_command: vibe-trading-mcp
+  mcp_url: stdio
+  http_url: http://localhost:8000
+  auto_start_mcp: true
+  read_only: true
+  allowed_capabilities:
+    - backtest
+    - research
+    - alpha_bench
+    - swarm
+    - hypothesis
+    - web_search
+
+agent:
+  adapter: "claude"
+  default_cli: "claude"
+  timeout_sec: 300
+  workdir: ""  # defaults to the config file's directory at bootstrap
+  headless_args: []
+
+mcp:
+  enabled: false
+  transport: "stdio"
+  port: 8711
+
+notifier:
+  telegram:
+    enabled: false
+    bot_token: ""
+    chat_id: ""
+  pushplus:
+    enabled: true
+    token: ""
+  email:
+    enabled: false
+    smtp_host: ""
+    smtp_port: 465
+    username: ""
+    password: ""
+    from_addr: ""
+    to_addrs: []
+
+openalice:
+  workspace_id: auto-quant-clear-willow-field
+  cli_gateway_url: http://127.0.0.1:47332
+  export: data
+  default_timeout: 300
+
+llm:
+  provider: openai
+  model: openai/z-ai/glm-4.7-flash:free
+  api_key: ""
+  api_base: "https://api.ofox.ai/v1"
+  timeout: 30
+
+# Per-tool configuration overrides. Each tool has its own config model
+# registered in TOOL_CONFIG_MODELS (runtime/config_loader.py); unknown tool
+# names fail at load time. news_filter_tool supports `llm` overrides (fields
+# not listed inherit from the global `llm` block above), `batch_size`
+# (articles scored per LLM call), and a `prompt.template` override — a
+# scoring prompt template with placeholders {count} and {articles}. It must
+# keep the JSON output contract
+# {"ratings": [{"id": string, "score": float 0-1, "reason": string}, ...]}.
+# Example:
+# tools:
+#   news_filter_tool:
+#     llm:
+#       model: gpt-4o-mini
+#       timeout: 15
+#     batch_size: 5
+#     prompt:
+#       template: |
+#         You are a U.S. equities risk analyst. Rate EACH article's relevance to
+#         short-term equity trading and its tail-risk potential. Return ONLY JSON:
+#         {"ratings": [{"id": string, "score": float 0-1, "reason": string}, ...]}
+#         with exactly one entry per article, keyed by the article id given below.
+#
+#         Articles ({count}):
+#         {articles}
+tools: {}
