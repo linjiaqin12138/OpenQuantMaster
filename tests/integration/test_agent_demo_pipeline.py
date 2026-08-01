@@ -107,7 +107,7 @@ notifier:
                         "tool": "notify_tool",
                         "inputs": {
                             "subject": "Agent Demo Report",
-                            "body": "$agent_analyze.summary",
+                            "body": "$agent_analyze.out.summary",
                             "channels": ["pushplus"],
                         },
                     },

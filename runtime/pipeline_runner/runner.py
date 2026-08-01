@@ -132,6 +132,7 @@ class PipelineRunner:
         tool_name = stage["tool"]
         raw_inputs = stage.get("inputs", {})
         resolved_inputs = self._resolve_inputs(raw_inputs, context)
+        context.stage_inputs[stage_name] = resolved_inputs
 
         stage_run = await self._store.create_stage_run(
             pipeline_run_id=run_id,
@@ -233,18 +234,34 @@ class PipelineRunner:
         await self._checkpoint.write(stage_name, context)
 
     def _resolve_inputs(self, raw_inputs: dict[str, Any], context: RunContext) -> dict[str, Any]:
-        resolved: dict[str, Any] = {}
-        for key, value in raw_inputs.items():
+        def walk(source: Any, path: list[str]) -> Any:
+            current = source
+            for part in path:
+                if not isinstance(current, dict):
+                    return None
+                current = current.get(part)
+            return current
+
+        def resolve_ref(ref: str) -> Any:
+            parts = ref.split(".")
+            if parts[0] == "inputs":
+                return walk(context.inputs, parts[1:])
+            if len(parts) < 3 or parts[1] not in ("in", "out"):
+                return None
+            stage_name, kind, path = parts[0], parts[1], parts[2:]
+            source = context.stage_inputs if kind == "in" else context.outputs
+            return walk(source.get(stage_name), path)
+
+        def resolve(value: Any) -> Any:
             if isinstance(value, str) and value.startswith("$"):
-                ref = value[1:]
-                if "." in ref:
-                    stage_name, field = ref.split(".", 1)
-                    resolved[key] = context.outputs.get(stage_name, {}).get(field)
-                else:
-                    resolved[key] = context.inputs.get(ref)
-            else:
-                resolved[key] = value
-        return resolved
+                return resolve_ref(value[1:])
+            if isinstance(value, dict):
+                return {k: resolve(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [resolve(item) for item in value]
+            return value
+
+        return {key: resolve(value) for key, value in raw_inputs.items()}
 
     async def _persist_artifact(
         self,

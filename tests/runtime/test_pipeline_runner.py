@@ -208,3 +208,39 @@ async def test_runner_persists_signals_from_tool_output(runner_setup):
     assert signals[0].symbol == "BTCUSDT"
     assert signals[0].side == SignalSide.long
     assert signals[0].market == MarketType.crypto
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_resolve_inputs_recurses_into_nested_structures(runner_setup):
+    import uuid
+
+    from runtime.pipeline_runner.context import RunContext
+
+    context = RunContext(
+        pipeline_run_id=uuid.uuid4(),
+        inputs={"symbol": "BTCUSDT"},
+        stage_inputs={"fetch": {"symbol": "BTCUSDT"}},
+        outputs={"ohlcv": {"artifact": "ohlcv_BTC_1h.csv", "meta": {"timeframe": "1h"}}},
+    )
+    raw = {
+        "top": "$ohlcv.out.artifact",
+        "nested_path": "$ohlcv.out.meta.timeframe",
+        "from_stage_inputs": "$fetch.in.symbol",
+        "calls": {
+            "indicators": {"tool": "indicator_tool", "inputs": {"artifact": "$ohlcv.out.artifact"}},
+        },
+        "items": ["$inputs.symbol", {"nested": "$ohlcv.out.artifact"}, 42],
+        "bad_kind": "$ohlcv.bad.field",
+        "unknown_stage": "$nostage.out.x",
+        "plain": "not-a-ref",
+    }
+    resolved = runner_setup.runner._resolve_inputs(raw, context)
+    assert resolved["top"] == "ohlcv_BTC_1h.csv"
+    assert resolved["nested_path"] == "1h"
+    assert resolved["from_stage_inputs"] == "BTCUSDT"
+    assert resolved["calls"]["indicators"]["inputs"]["artifact"] == "ohlcv_BTC_1h.csv"
+    assert resolved["items"] == ["BTCUSDT", {"nested": "ohlcv_BTC_1h.csv"}, 42]
+    assert resolved["bad_kind"] is None
+    assert resolved["unknown_stage"] is None
+    assert resolved["plain"] == "not-a-ref"

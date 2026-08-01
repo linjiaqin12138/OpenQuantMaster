@@ -157,7 +157,7 @@ stages:
       tool: indicator_tool
       inputs:
         source: ohlcv_artifact
-        artifact: "$fetch_ohlcv.artifact"
+        artifact: "$fetch_ohlcv.out.artifact"
         indicators:
           - sma
           - ema

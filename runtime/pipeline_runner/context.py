@@ -12,6 +12,7 @@ from tools.base.tool_result import ArtifactRef
 class RunContext:
     pipeline_run_id: uuid.UUID
     inputs: dict[str, Any] = field(default_factory=dict)
+    stage_inputs: dict[str, Any] = field(default_factory=dict)
     outputs: dict[str, Any] = field(default_factory=dict)
     artifacts: list[ArtifactRef] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -21,6 +22,7 @@ class RunContext:
             {
                 "pipeline_run_id": str(self.pipeline_run_id),
                 "inputs": self.inputs,
+                "stage_inputs": self.stage_inputs,
                 "outputs": self.outputs,
                 "artifacts": [a.model_dump() for a in self.artifacts],
                 "metadata": self.metadata,
