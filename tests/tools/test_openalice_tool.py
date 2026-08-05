@@ -246,3 +246,39 @@ async def test_corrupt_session_file_treated_as_empty(tmp_path: Path, monkeypatch
 
     assert result.success is True
     assert client.conversation_ask.await_args.kwargs["resume_id"] is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_context_appended_as_json(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client = AsyncMock(spec=OpenAliceClient)
+    client.conversation_ask = AsyncMock(return_value=_ask_result())
+    tool = _build_tool(tmp_path, client)
+
+    result = await tool.execute(
+        {"prompt": "analyze", "context": {"indicators": {"rsi": 42}, "news": ["标题"]}}
+    )
+
+    assert result.success is True
+    prompt = client.conversation_ask.await_args.kwargs["prompt"]
+    assert prompt.startswith("analyze\n\n[上下文数据 JSON]\n")
+    payload = json.loads(prompt.split("[上下文数据 JSON]\n", 1)[1])
+    assert payload == {"indicators": {"rsi": 42}, "news": ["标题"]}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_context_counts_toward_truncation_limit(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client = AsyncMock(spec=OpenAliceClient)
+    client.conversation_ask = AsyncMock(return_value=_ask_result())
+    tool = _build_tool(tmp_path, client)
+
+    result = await tool.execute({"prompt": "analyze", "context": {"blob": "x" * 17000}})
+
+    assert result.success is True
+    assert result.data["truncated"] is True
+    prompt = client.conversation_ask.await_args.kwargs["prompt"]
+    assert len(prompt) == 16000
+    assert prompt.startswith("analyze\n\n[上下文数据 JSON]\n")

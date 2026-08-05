@@ -32,6 +32,7 @@ All fields can be overridden via env vars, e.g. `QUANT_AGENT_OPENALICE__WORKSPAC
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `prompt` | string | yes | — | Prompt for the agent. Truncated to 16000 chars (server-enforced limit); `truncated` flags when this happens. |
+| `context` | object | no | `null` | Arbitrary JSON payload appended to the prompt as `[上下文数据 JSON]\n<json>` — this is how pipeline stages inject upstream data (e.g. `$context.out.indicators.data`), since stage references only work as whole-string values. Counts toward the 16000-char limit (context is truncated first, instructions survive). |
 | `wait` | boolean | no | `true` | `true`: server waits for the run to finish (`await:true`) and the reply is returned in one call. `false`: return immediately after dispatch with `status="running"`. |
 | `timeout_sec` | integer | no | `openalice.default_timeout` (300) | Server-side run watchdog (`timeoutMs`), max 1800. |
 | `resume` | boolean | no | `true` | `true`: continue the persisted session (if any). `false`: always start a fresh conversation. |
@@ -111,6 +112,9 @@ stages:
       tool: openalice_tool
       inputs:
         prompt: "请读取 news/active-narratives.md，结合最新仓位给出研判总结。"
+        context:                       # optional: JSON appended to the prompt
+          indicators: "$context.out.indicators.data"
+          news_digest: "$context.out.news_digest.data"
         timeout_sec: 600
   - notify:
       tool: notify_tool
@@ -119,6 +123,8 @@ stages:
         body: "$decide.out.response"
         channels: [pushplus]
 ```
+
+A complete runnable example is `pipelines/hourly_review.yaml`.
 
 ## Notes
 

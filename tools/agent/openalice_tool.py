@@ -20,6 +20,7 @@ PROMPT_MAX_CHARS = 16000
 
 class OpenAliceToolInput(BaseModel):
     prompt: str = Field(min_length=1)
+    context: dict[str, Any] | None = None
     wait: bool = True
     timeout_sec: int | None = Field(default=None, ge=1, le=1800)
     resume: bool = True
@@ -62,6 +63,9 @@ class OpenAliceTool(BaseTool):
         )
 
         prompt = validated.prompt
+        if validated.context is not None:
+            context_json = json.dumps(validated.context, ensure_ascii=False, default=str)
+            prompt = f"{prompt}\n\n[上下文数据 JSON]\n{context_json}"
         truncated = False
         if len(prompt) > PROMPT_MAX_CHARS:
             logger.warning(
