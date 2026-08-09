@@ -148,7 +148,7 @@ Other top-level keys in the file are preserved so the same file can be shared wi
 ## Error handling
 
 - **OpenAlice gateway failure** — returns `ToolResult(success=False, error=...)`.
-- **LLM failure after retries** — best-effort PushPlus notification, then returns `ToolResult(success=False, error=...)`.
+- **LLM failure after retries** — returns `ToolResult(success=False, error=...)`. Failure notification is the caller's (pipeline's) responsibility.
 - **Batch parse failure** — if a batch's response cannot be parsed, every article in that batch is placed in `degraded` and processing continues with the next batch. Articles missing from the `ratings` array are also placed in `degraded`.
 - **No keyword fallback** — the tool never falls back to simple keyword matching.
 

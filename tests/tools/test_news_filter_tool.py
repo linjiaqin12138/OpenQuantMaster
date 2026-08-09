@@ -52,12 +52,11 @@ def _make_llm_response(content: str) -> MagicMock:
 
 
 def _build_tool(
-    tmp_path: Path, client: AsyncMock, notifier: AsyncMock | None = None
+    tmp_path: Path, client: AsyncMock
 ) -> NewsFilterTool:
     return NewsFilterTool(
         artifacts_path=tmp_path / "artifacts",
         openalice_client=client,
-        notifier=notifier or AsyncMock(),
         watch_state_path=tmp_path / "watch_state.json",
     )
 
@@ -184,7 +183,7 @@ async def test_news_filter_openalice_error_returns_failure(tmp_path: Path, monke
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_news_filter_llm_failure_notifies_and_fails(tmp_path: Path, monkeypatch):
+async def test_news_filter_llm_failure_fails(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _write_config(tmp_path)
 
@@ -192,10 +191,8 @@ async def test_news_filter_llm_failure_notifies_and_fails(tmp_path: Path, monkey
     client = AsyncMock()
     client.window_rss = AsyncMock(return_value={"total": 1, "results": articles})
     client.read_rss = AsyncMock(return_value=_make_full_article(990, "Major exploit"))
-    notifier = AsyncMock()
-    notifier.send = AsyncMock(return_value={"pushplus": "ok"})
 
-    tool = _build_tool(tmp_path, client, notifier)
+    tool = _build_tool(tmp_path, client)
     # Bypass the tenacity retry wrapper to keep the test fast.
     tool._call_litellm = AsyncMock(side_effect=RuntimeError("LLM timeout"))
 
@@ -203,9 +200,6 @@ async def test_news_filter_llm_failure_notifies_and_fails(tmp_path: Path, monkey
 
     assert result.success is False
     assert "LLM scoring failed" in result.error
-    notifier.send.assert_awaited_once()
-    call = notifier.send.await_args
-    assert "news_filter_tool LLM failure" in call.kwargs["subject"]
 
 
 @pytest.mark.unit
@@ -219,8 +213,7 @@ async def test_news_filter_skips_seen_articles(tmp_path: Path, monkeypatch):
     client.window_rss = AsyncMock(return_value={"total": 1, "results": articles})
     client.read_rss = AsyncMock(return_value=_make_full_article(100, "First article"))
 
-    notifier = AsyncMock()
-    tool = _build_tool(tmp_path, client, notifier)
+    tool = _build_tool(tmp_path, client)
 
     with patch(
         "tools.news.news_filter_tool.litellm.acompletion",

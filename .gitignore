@@ -14,6 +14,9 @@ data/
 *.db
 *.db-journal
 
+# Playground 探索脚本的输出（脚本本身入库，输出不入库）
+playground/*/output/
+
 # Environment
 .env
 config.yaml

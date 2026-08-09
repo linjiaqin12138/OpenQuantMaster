@@ -20,7 +20,6 @@ from tenacity import (
 )
 
 from runtime.config_loader import RuntimeConfig, get_llm_config, load_config
-from runtime.notifier.composite import build_notifier
 from runtime.openalice_client import OpenAliceClient, OpenAliceError
 from tools.base.base_tool import BaseTool
 from tools.base.tool_result import ArtifactRef, ToolResult
@@ -96,12 +95,10 @@ class NewsFilterTool(BaseTool):
         self,
         artifacts_path: Path | str | None = None,
         openalice_client: OpenAliceClient | None = None,
-        notifier: Any | None = None,
         watch_state_path: Path | str | None = None,
     ) -> None:
         self._artifacts_path: Path | None = Path(artifacts_path) if artifacts_path else None
         self._openalice_client: OpenAliceClient | None = openalice_client
-        self._notifier: Any | None = notifier
         self._watch_state_path: Path | None = Path(watch_state_path) if watch_state_path else None
 
     async def _execute(self, inputs: dict[str, Any]) -> ToolResult:
@@ -125,7 +122,6 @@ class NewsFilterTool(BaseTool):
         client = self._openalice_client or OpenAliceClient(
             cfg.openalice, timeout=float(cfg.llm.timeout)
         )
-        notifier = self._notifier or build_notifier(cfg.notifier)
 
         from_time = self._compute_from_time(params["window_minutes"])
         try:
@@ -196,7 +192,6 @@ class NewsFilterTool(BaseTool):
                         medium_pending.append(scored)
         except Exception as exc:
             logger.error("news_filter.llm_failed", error=str(exc))
-            await self._notify_failure(notifier, exc)
             return ToolResult(
                 success=False,
                 error=f"LLM scoring failed after retries: {exc}",
@@ -520,18 +515,6 @@ class NewsFilterTool(BaseTool):
                 reason = str(reason) if reason is not None else ""
             result[str(article_id)] = (max(0.0, min(1.0, float(score))), reason)
         return result
-
-    async def _notify_failure(self, notifier: Any, exc: Exception) -> None:
-        try:
-            await notifier.send(
-                subject="news_filter_tool LLM failure",
-                body=f"The news filter tool failed to score articles after retries. Error: {exc}",
-            )
-        except Exception as notify_exc:
-            logger.warning(
-                "news_filter.notification_failed",
-                error=str(notify_exc),
-            )
 
     def _persist_artifact(
         self,
