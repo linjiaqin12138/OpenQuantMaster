@@ -244,3 +244,88 @@ async def test_resolve_inputs_recurses_into_nested_structures(runner_setup):
     assert resolved["bad_kind"] is None
     assert resolved["unknown_stage"] is None
     assert resolved["plain"] == "not-a-ref"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_run_pipeline_resolves_stage_output_refs(runner_setup):
+    pipelines_dir = runner_setup.runner._pipelines_dir
+    (pipelines_dir / "ref_pipeline.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "ref_pipeline",
+                "version": "1.0",
+                "stages": [
+                    {"name": "greet", "tool": "echo_tool", "inputs": {"message": "hello", "repeat": 1}},
+                    {"name": "repeat", "tool": "echo_tool", "inputs": {"message": "$greet.out.echoed", "repeat": 2}},
+                ],
+            }
+        )
+    )
+    run_id = await runner_setup.runner.run_pipeline("ref_pipeline")
+    run = await runner_setup.store.get_pipeline_run(run_id)
+    assert run.status == RunStatus.completed
+    assert run.stage_runs[1].inputs_snapshot["message"] == "hello"
+    assert run.stage_runs[1].outputs_snapshot["data"]["echoed"] == "hello hello"
+
+
+class FlakyTool(BaseTool):
+    name: ClassVar[str] = "flaky_tool"
+    version: ClassVar[str] = "0.1.0"
+    capability: ClassVar[str] = "demo"
+    input_model: ClassVar[type[BaseModel]] = EchoInput
+    output_model: ClassVar[type[BaseModel]] = EchoOutput
+
+    def __init__(self, fail_times: int) -> None:
+        self.calls = 0
+        self._fail_times = fail_times
+
+    async def _execute(self, inputs: dict[str, Any]) -> ToolResult:
+        self.calls += 1
+        if self.calls <= self._fail_times:
+            return ToolResult(success=False, error=f"boom {self.calls}")
+        return ToolResult(success=True, data={"echoed": inputs["message"]})
+
+
+def _write_retry_pipeline(pipelines_dir, retries: int) -> None:
+    (pipelines_dir / "retry_pipeline.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "retry_pipeline",
+                "version": "1.0",
+                "stages": [
+                    {
+                        "name": "flaky",
+                        "tool": "flaky_tool",
+                        "inputs": {"message": "hi"},
+                        "on_failure": "retry",
+                        "retries": retries,
+                    }
+                ],
+            }
+        )
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_on_failure_retry_recovers(runner_setup):
+    tool = FlakyTool(fail_times=2)
+    runner_setup.registry._tools["flaky_tool"] = tool
+    _write_retry_pipeline(runner_setup.runner._pipelines_dir, retries=2)
+    run_id = await runner_setup.runner.run_pipeline("retry_pipeline")
+    run = await runner_setup.store.get_pipeline_run(run_id)
+    assert run.status == RunStatus.completed
+    assert tool.calls == 3
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_on_failure_retry_exhausted_fails_run(runner_setup):
+    tool = FlakyTool(fail_times=5)
+    runner_setup.registry._tools["flaky_tool"] = tool
+    _write_retry_pipeline(runner_setup.runner._pipelines_dir, retries=1)
+    run_id = await runner_setup.runner.run_pipeline("retry_pipeline")
+    run = await runner_setup.store.get_pipeline_run(run_id)
+    assert run.status == RunStatus.failed
+    assert tool.calls == 2

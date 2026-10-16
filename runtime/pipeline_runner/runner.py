@@ -27,12 +27,17 @@ from .context import RunContext
 
 logger = structlog.get_logger()
 
+DEFAULT_RETRIES = 2
+
 
 class PipelineRunnerError(Exception):
     pass
 
 
 class PipelineRunner:
+    """Prefect-backed pipeline engine. Each stage is compiled to a dynamically
+    created Prefect task (named after the stage) and chained sequentially into
+    a flow. Runs in Prefect's ephemeral mode; no server required."""
     def __init__(
         self,
         config: RuntimeConfig,
@@ -87,20 +92,12 @@ class PipelineRunner:
             correlation_id=run_id,
         )
 
+        pipeline_flow = self._build_flow(manifest, run_id, context)
         try:
-            for sequence, stage in enumerate(manifest["stages"]):
-                await self._run_stage(run_id, sequence, stage, context, manifest_name=manifest["name"])
-        except PipelineRunnerError:
-            logger.warning("pipeline.run.failed", run_id=str(run_id), pipeline_name=manifest["name"])
-            return run_id
+            await pipeline_flow()
         except Exception as exc:
-            logger.exception("pipeline.run.failed", run_id=str(run_id))
-            await self._store.update_pipeline_run_status(run_id, RunStatus.failed)
-            await self._bus.publish(
-                "pipeline.run.failed",
-                {"pipeline_name": manifest["name"], "error": str(exc)},
-                correlation_id=run_id,
-            )
+            logger.warning("pipeline.run.failed", run_id=str(run_id), pipeline_name=manifest["name"])
+            await self._fail_run(run_id, manifest["name"], str(exc))
             return run_id
 
         await self._store.update_pipeline_run_status(run_id, RunStatus.completed)
@@ -111,6 +108,41 @@ class PipelineRunner:
         )
         return run_id
 
+    def _build_flow(self, manifest: dict[str, Any], run_id: uuid.UUID, context: RunContext):
+        from prefect import flow
+
+        stage_tasks = [
+            (sequence, stage, self._build_stage_task(stage))
+            for sequence, stage in enumerate(manifest["stages"])
+        ]
+
+        @flow(name=f"pipeline:{manifest['name']}")
+        async def _pipeline_flow() -> None:
+            for sequence, stage, stage_task in stage_tasks:
+                await stage_task(run_id, sequence, stage, context)
+
+        return _pipeline_flow
+
+    def _build_stage_task(self, stage: dict[str, Any]):
+        from prefect import task
+
+        async def _stage_task(
+            run_id: uuid.UUID,
+            sequence: int,
+            stage: dict[str, Any],
+            context: RunContext,
+            _runner: PipelineRunner = self,
+        ) -> None:
+            await _runner._execute_stage(run_id, sequence, stage, context)
+
+        options: dict[str, Any] = {"name": stage["name"]}
+        if stage.get("on_failure") == "retry":
+            options["retries"] = stage.get("retries", DEFAULT_RETRIES)
+            options["retry_delay_seconds"] = stage.get("retry_delay_sec", 0)
+        if stage.get("timeout_sec") is not None:
+            options["timeout_seconds"] = stage["timeout_sec"]
+        return task(**options)(_stage_task)
+
     def _load_manifest(self, pipeline_name: str) -> dict[str, Any]:
         path = self._pipelines_dir / f"{pipeline_name}.yaml"
         if not path.exists():
@@ -120,13 +152,20 @@ class PipelineRunner:
             jsonschema.validate(instance=manifest, schema=self._schema)
         return manifest
 
-    async def _run_stage(
+    async def _fail_run(self, run_id: uuid.UUID, manifest_name: str, error: str) -> None:
+        await self._store.update_pipeline_run_status(run_id, RunStatus.failed)
+        await self._bus.publish(
+            "pipeline.run.failed",
+            {"pipeline_name": manifest_name, "error": error},
+            correlation_id=run_id,
+        )
+
+    async def _execute_stage(
         self,
         run_id: uuid.UUID,
         sequence: int,
         stage: dict[str, Any],
         context: RunContext,
-        manifest_name: str,
     ) -> None:
         stage_name = stage["name"]
         tool_name = stage["tool"]
@@ -186,12 +225,6 @@ class PipelineRunner:
             await self._bus.publish(
                 "stage.run.failed",
                 {"stage_name": stage_name, "error": failure_error},
-                correlation_id=run_id,
-            )
-            await self._store.update_pipeline_run_status(run_id, RunStatus.failed)
-            await self._bus.publish(
-                "pipeline.run.failed",
-                {"pipeline_name": manifest_name, "error": failure_error},
                 correlation_id=run_id,
             )
             raise PipelineRunnerError(failure_error)

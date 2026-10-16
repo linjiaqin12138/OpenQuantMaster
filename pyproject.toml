@@ -25,6 +25,7 @@ dependencies = [
     "pyyaml>=6.0.1",
     "sqlalchemy>=2.0.30",
     "structlog>=24.1.0",
+    "prefect>=3,<4",
     "ccxt>=4.3.0",
     "yfinance>=0.2.40",
     "akshare>=1.14.0",
