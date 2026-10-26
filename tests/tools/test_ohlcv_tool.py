@@ -25,9 +25,17 @@ event_bus:
 logging:
   level: INFO
   format: json
+exchanges:
+  binance:
+    apiKey: ""
+    secret: ""
+    spot:
+      ccxt_id: binance
+      sandbox: false
 market_data:
   crypto:
-    default_exchange: binance
+    exchange: binance
+    product: spot
 """
     )
 

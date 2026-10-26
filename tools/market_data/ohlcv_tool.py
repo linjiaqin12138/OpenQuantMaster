@@ -86,14 +86,16 @@ class OHLCVTool(BaseTool):
     ) -> pd.DataFrame:
         import ccxt.async_support as ccxt
 
-        exchange_id = cfg.market_data.crypto.default_exchange
-        exchange_class = getattr(ccxt, exchange_id, None)
-        if exchange_class is None:
-            raise ValueError(f"Unsupported crypto exchange: {exchange_id}")
+        from runtime.exchange_resolve import resolve_exchange
 
-        keys = cfg.market_data.crypto.exchange_keys.get(exchange_id, {})
-        exchange = exchange_class({"enableRateLimit": True, **keys})
-        if cfg.market_data.crypto.sandbox:
+        crypto = cfg.market_data.crypto
+        resolved = resolve_exchange(cfg, crypto.exchange, crypto.product)
+        exchange_class = getattr(ccxt, resolved.ccxt_id, None)
+        if exchange_class is None:
+            raise ValueError(f"Unsupported crypto exchange: {resolved.ccxt_id}")
+
+        exchange = exchange_class(resolved.ccxt_options())
+        if resolved.sandbox:
             if hasattr(exchange, "set_sandbox_mode"):
                 await exchange.set_sandbox_mode(True)
 

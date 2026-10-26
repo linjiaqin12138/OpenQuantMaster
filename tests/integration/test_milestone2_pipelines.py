@@ -78,14 +78,27 @@ event_bus:
 logging:
   level: DEBUG
   format: console
+exchanges:
+  binance:
+    apiKey: ""
+    secret: ""
+    spot:
+      ccxt_id: binance
+      sandbox: false
+    usdm:
+      ccxt_id: binanceusdm
+      sandbox: true
 market_data:
   crypto:
-    default_exchange: binance
-    sandbox: false
-    exchange_keys: {{}}
+    exchange: binance
+    product: spot
   equities:
     tushare_token: ""
     yfinance_timeout: 30
+execution:
+  binance_perp:
+    exchange: binance
+    product: usdm
 """
     )
     result = await bootstrap(config_path, package=tools)

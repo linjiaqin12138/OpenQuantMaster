@@ -29,10 +29,31 @@ class LoggingConfig(BaseModel):
     format: Literal["json", "console"] = "json"
 
 
-class CryptoMarketDataConfig(BaseModel):
-    default_exchange: str = "binance"
+class BinanceProductConfig(BaseModel):
+    ccxt_id: str
     sandbox: bool = False
-    exchange_keys: dict[str, dict[str, str]] = Field(default_factory=dict)
+    apiKey: str | None = None
+    secret: str | None = None
+
+
+class BinanceExchangeConfig(BaseModel):
+    apiKey: str = ""
+    secret: str = ""
+    spot: BinanceProductConfig = Field(
+        default_factory=lambda: BinanceProductConfig(ccxt_id="binance", sandbox=False)
+    )
+    usdm: BinanceProductConfig = Field(
+        default_factory=lambda: BinanceProductConfig(ccxt_id="binanceusdm", sandbox=True)
+    )
+
+
+class ExchangesConfig(BaseModel):
+    binance: BinanceExchangeConfig = Field(default_factory=BinanceExchangeConfig)
+
+
+class CryptoMarketDataConfig(BaseModel):
+    exchange: str = "binance"
+    product: Literal["spot", "usdm"] = "spot"
 
 
 class EquitiesMarketDataConfig(BaseModel):
@@ -43,6 +64,15 @@ class EquitiesMarketDataConfig(BaseModel):
 class MarketDataConfig(BaseModel):
     crypto: CryptoMarketDataConfig = Field(default_factory=CryptoMarketDataConfig)
     equities: EquitiesMarketDataConfig = Field(default_factory=EquitiesMarketDataConfig)
+
+
+class BinancePerpExecutionConfig(BaseModel):
+    exchange: str = "binance"
+    product: Literal["usdm"] = "usdm"
+
+
+class ExecutionConfig(BaseModel):
+    binance_perp: BinancePerpExecutionConfig = Field(default_factory=BinancePerpExecutionConfig)
 
 
 class PushplusConfig(BaseModel):
@@ -85,7 +115,9 @@ class RuntimeConfig(BaseSettings):
     scheduler: SchedulerConfig = SchedulerConfig()
     event_bus: EventBusConfig = EventBusConfig()
     logging: LoggingConfig = LoggingConfig()
+    exchanges: ExchangesConfig = Field(default_factory=ExchangesConfig)
     market_data: MarketDataConfig = MarketDataConfig()
+    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     notifier: NotifierConfig = Field(default_factory=NotifierConfig)
     config_path: Path | None = None
 

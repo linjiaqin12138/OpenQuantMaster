@@ -14,7 +14,7 @@ quantmaster-daemon --run hello_pipeline
 
 ## Configuration
 
-Configuration is loaded from `config.yaml` by default. You can override it with the `--config` CLI option or through environment variables prefixed with `QUANT_AGENT_` (nested keys use double underscores, e.g. `QUANT_AGENT_MARKET_DATA__CRYPTO__DEFAULT_EXCHANGE=binance`).
+Configuration is loaded from `config.yaml` by default. You can override it with the `--config` CLI option or through environment variables prefixed with `QUANT_AGENT_` (nested keys use double underscores, e.g. `QUANT_AGENT_MARKET_DATA__CRYPTO__EXCHANGE=binance`).
 
 ### Default `config.yaml`
 
@@ -37,14 +37,29 @@ logging:
   level: INFO
   format: json
 
+exchanges:
+  binance:
+    apiKey: ""
+    secret: ""
+    spot:
+      ccxt_id: binance
+      sandbox: false
+    usdm:
+      ccxt_id: binanceusdm
+      sandbox: true
+
 market_data:
   crypto:
-    default_exchange: binance
-    sandbox: false
-    exchange_keys: {}
+    exchange: binance
+    product: spot
   equities:
     tushare_token: ""
     yfinance_timeout: 30
+
+execution:
+  binance_perp:
+    exchange: binance
+    product: usdm
 
 notifier:
   pushplus:
@@ -56,7 +71,9 @@ notifier:
 
 - `paths` — where runtime artifacts, logs, and the SQLite database are stored.
 - `scheduler` — default timezone for cron-triggered pipelines.
-- `market_data.crypto` — default crypto exchange and optional API keys.
+- `exchanges.binance` — Binance credentials and per-product connection settings (`spot` / `usdm`). Product blocks may override `apiKey`/`secret`.
+- `market_data.crypto` — references `exchanges.<name>` via `exchange` + `product` (no embedded keys).
+- `execution.binance_perp` — references the USDM product for perpetual trading.
 - `market_data.equities` — `tushare_token` for A-share data and `yfinance_timeout` for US/HK equities.
 - `notifier` — PushPlus / Telegram / email notification channels.
 
@@ -159,7 +176,7 @@ Fetch OHLCV data for crypto, US equities, HK equities, or A-shares.
 
 **Provider selection**
 
-- `crypto` or `source: ccxt` → CCXT (exchange from `market_data.crypto.default_exchange`).
+- `crypto` or `source: ccxt` → CCXT (resolved from `market_data.crypto` → `exchanges.<exchange>.<product>`).
 - `us_equity` / `hk_equity` or `source: yfinance` → yfinance.
 - `a_share` → tushare if `tushare_token` is set, otherwise akshare.
 
@@ -185,6 +202,28 @@ quantmaster-run crypto_15m_data
 ```
 
 Output is a CSV artifact stored under `./artifacts/<run_id>/fetch_sol/ohlcv_SOLUSDT.P_15m.csv`.
+
+### `binance_perp_tool`
+
+Binance USDT-M perpetual trading via CCXT (`binanceusdm`). Credentials come from `exchanges.binance` (referenced by `execution.binance_perp`). Write actions default to `dry_run: true`.
+
+**Actions**
+
+| action | Notes |
+|--------|--------|
+| `balance` / `positions` / `open_orders` | Read; `symbol` optional for positions/orders |
+| `create_order` | `market`, `limit`, `stop_market`, `take_profit_market`, `stop`, `take_profit`, `trailing_stop_market` |
+| `cancel_order` | Requires `order_id` + `symbol` |
+| `set_leverage` / `set_margin_mode` | Per symbol |
+| `set_position_mode` | `hedge: true/false` |
+
+**CLI examples**
+
+```bash
+python -m runtime.cli tool binance_perp_tool --inputs '{"action":"balance"}'
+python -m runtime.cli tool binance_perp_tool --inputs '{"action":"create_order","symbol":"BTC/USDT:USDT","side":"buy","order_type":"market","amount":0.001}'
+python -m runtime.cli tool binance_perp_tool --inputs '{"action":"create_order","symbol":"BTC/USDT:USDT","side":"sell","order_type":"stop_market","amount":0.001,"stop_price":45000,"reduce_only":true,"dry_run":false}'
+```
 
 ### Other built-in tools
 

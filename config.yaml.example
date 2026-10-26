@@ -17,14 +17,32 @@ logging:
   level: INFO
   format: json
 
+exchanges:
+  binance:
+    apiKey: ""
+    secret: ""
+    spot:
+      ccxt_id: binance
+      sandbox: false
+    usdm:
+      ccxt_id: binanceusdm
+      sandbox: true
+      # Optional product-level key override:
+      # apiKey: ""
+      # secret: ""
+
 market_data:
   crypto:
-    default_exchange: binance
-    sandbox: false
-    exchange_keys: {}
+    exchange: binance
+    product: spot
   equities:
     tushare_token: ""
     yfinance_timeout: 30
+
+execution:
+  binance_perp:
+    exchange: binance
+    product: usdm
 
 notifier:
   telegram:
