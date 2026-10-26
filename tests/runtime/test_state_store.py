@@ -25,7 +25,7 @@ def test_pipeline_run_defaults():
 @pytest.mark.unit
 def test_signal_defaults():
     signal = Signal(
-        source="vibe-trading",
+        source="ohlcv_tool",
         strategy_id="dual_ema_v1",
         symbol="BTCUSDT",
         market=MarketType.crypto,
@@ -41,7 +41,7 @@ def test_signal_defaults():
 @pytest.mark.asyncio
 async def test_create_and_list_signals(store):
     signal = await store.create_signal(
-        source="vibe-trading",
+        source="ohlcv_tool",
         strategy_id="dual_ema_v1",
         symbol="BTCUSDT",
         market=MarketType.crypto,

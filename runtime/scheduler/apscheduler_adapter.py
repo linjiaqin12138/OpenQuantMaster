@@ -69,7 +69,14 @@ class APSchedulerAdapter:
     async def stop(self) -> None:
         self._stop_event.set()
         if self._task is not None:
-            await self._task
+            try:
+                await asyncio.wait_for(self._task, timeout=5.0)
+            except (TimeoutError, asyncio.CancelledError):
+                self._task.cancel()
+                try:
+                    await self._task
+                except asyncio.CancelledError:
+                    pass
             self._task = None
         self._scheduler = None
 

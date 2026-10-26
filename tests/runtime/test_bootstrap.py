@@ -49,13 +49,6 @@ async def test_bootstrap_wires_all_subsystems(boot):
     assert result.runner is not None
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_bootstrap_defaults_agent_workdir_to_config_dir(boot):
-    result, config_path = boot
-    assert result.config.agent.workdir == str(config_path.resolve().parent)
-
-
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_bootstrap_fails_on_missing_config():

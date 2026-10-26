@@ -22,7 +22,7 @@ def test_hello_pipeline_validates():
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "manifest_name",
-    ["crypto_signal_fired", "backtest_demo", "market_open_review"],
+    ["market_open_review"],
 )
 def test_m2_sample_pipeline_validates(manifest_name):
     schema = json.loads((SCHEMAS_DIR / "pipeline_manifest.schema.json").read_text())

@@ -39,7 +39,7 @@ class ParallelTool(BaseTool):
     The instance needs the live ToolRegistry, so it is skipped by
     ``ToolRegistry.discover`` (no-arg construction) and registered explicitly
     in ``runtime/bootstrap.py`` and ``runtime/cli.py`` — same pattern as
-    ``NotifyTool``/``AgentTool``.
+    ``NotifyTool``.
     """
 
     name: ClassVar[str] = "parallel_tool"

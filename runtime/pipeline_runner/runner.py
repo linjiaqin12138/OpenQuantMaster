@@ -13,7 +13,6 @@ import structlog
 import yaml
 from pydantic import ValidationError
 
-from runtime.agent_gateway.agent_driver import AgentDriver
 from runtime.config_loader import RuntimeConfig
 from runtime.event_bus.memory_bus import MemoryEventBus
 from runtime.notifier.composite import CompositeNotifier
@@ -39,14 +38,12 @@ class PipelineRunner:
         store: StateStore,
         bus: MemoryEventBus,
         registry: ToolRegistry,
-        agent_driver: AgentDriver | None = None,
         notifier: CompositeNotifier | None = None,
     ) -> None:
         self._config = config
         self._store = store
         self._bus = bus
         self._registry = registry
-        self._agent_driver = agent_driver
         self._notifier = notifier
         self._pipelines_dir = config.paths.pipelines
         self._schema = self._load_schema()

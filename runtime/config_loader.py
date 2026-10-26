@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,45 +45,6 @@ class MarketDataConfig(BaseModel):
     equities: EquitiesMarketDataConfig = Field(default_factory=EquitiesMarketDataConfig)
 
 
-class VibeTradingConfig(BaseModel):
-    mode: Literal["cli", "mcp", "http"] = "cli"
-    cli_path: str = "vibe-trading"
-    http_url: str = "http://localhost:8000"
-    mcp_url: str = "stdio"
-    mcp_command: str = "vibe-trading-mcp"
-    auto_start_mcp: bool = True
-    read_only: bool = True
-    allowed_capabilities: list[str] = Field(
-        default_factory=lambda: [
-            "backtest",
-            "research",
-            "alpha_bench",
-            "swarm",
-            "hypothesis",
-            "web_search",
-        ]
-    )
-
-
-class GenericAgentConfig(BaseModel):
-    prompt_flag: str = "-p"
-
-
-class AgentConfig(BaseModel):
-    adapter: Literal["claude", "codex", "kimi", "generic"] = "claude"
-    default_cli: str = "claude"
-    timeout_sec: int = 120
-    workdir: str = ""
-    headless_args: list[str] = Field(default_factory=list)
-    generic: GenericAgentConfig = Field(default_factory=GenericAgentConfig)
-
-
-class McpConfig(BaseModel):
-    enabled: bool = False
-    transport: Literal["stdio", "sse"] = "stdio"
-    port: int = 8711
-
-
 class PushplusConfig(BaseModel):
     enabled: bool = True
     token: str = ""
@@ -111,47 +72,6 @@ class NotifierConfig(BaseModel):
     email: EmailConfig = Field(default_factory=EmailConfig)
 
 
-class OpenAliceConfig(BaseModel):
-    workspace_id: str = "auto-quant-clear-willow-field"
-    cli_gateway_url: str = "http://127.0.0.1:47332"
-    export: str = "data"
-    default_timeout: int = 300
-
-
-class LLMConfig(BaseModel):
-    provider: str = "openai"
-    model: str = "gpt-4o-mini"
-    api_key: str = ""
-    api_base: str = ""
-    timeout: int = 30
-
-
-class BaseToolConfig(BaseModel):
-    """Base class for per-tool configuration.
-
-    Deliberately empty: each tool subclasses it and declares only the fields
-    it needs. Register subclasses in ``TOOL_CONFIG_MODELS`` so the ``tools:``
-    block in config.yaml is dispatched to the right model at load time.
-    """
-
-
-class NewsFilterPromptConfig(BaseModel):
-    """Prompt template override for news_filter_tool."""
-
-    template: str = ""  # empty → tool falls back to its built-in default
-
-
-class NewsFilterToolConfig(BaseToolConfig):
-    llm: LLMConfig | None = None
-    prompt: NewsFilterPromptConfig | None = None
-    batch_size: int = 1  # articles scored per LLM call
-
-
-TOOL_CONFIG_MODELS: dict[str, type[BaseToolConfig]] = {
-    "news_filter_tool": NewsFilterToolConfig,
-}
-
-
 class RuntimeConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="QUANT_AGENT_",
@@ -166,55 +86,12 @@ class RuntimeConfig(BaseSettings):
     event_bus: EventBusConfig = EventBusConfig()
     logging: LoggingConfig = LoggingConfig()
     market_data: MarketDataConfig = MarketDataConfig()
-    vibe_trading: VibeTradingConfig = VibeTradingConfig()
-    agent: AgentConfig = Field(default_factory=AgentConfig)
-    mcp: McpConfig = Field(default_factory=McpConfig)
     notifier: NotifierConfig = Field(default_factory=NotifierConfig)
-    openalice: OpenAliceConfig = Field(default_factory=OpenAliceConfig)
-    llm: LLMConfig = Field(default_factory=LLMConfig)
-    tools: dict[str, BaseToolConfig] = Field(default_factory=dict)
     config_path: Path | None = None
-
-    @field_validator("tools", mode="before")
-    @classmethod
-    def _dispatch_tool_configs(cls, value: Any) -> Any:
-        """Instantiate each tool's config with its registered model."""
-        if not isinstance(value, dict):
-            return value
-        dispatched: dict[str, Any] = {}
-        for name, raw in value.items():
-            model = TOOL_CONFIG_MODELS.get(name)
-            if model is None:
-                raise ValueError(
-                    f"unknown tool '{name}' in `tools:` config; "
-                    f"registered: {sorted(TOOL_CONFIG_MODELS)}"
-                )
-            dispatched[name] = raw if isinstance(raw, BaseToolConfig) else model(**raw)
-        return dispatched
 
     @property
     def database_url(self) -> str:
         return f"sqlite+aiosqlite:///{self.paths.database}"
-
-
-def get_llm_config(cfg: RuntimeConfig, tool_name: str) -> LLMConfig:
-    """Resolve the effective LLM config for a tool.
-
-    Starts from the global ``cfg.llm`` and merges any per-tool overrides
-    declared under ``cfg.tools[tool_name].llm`` (only tools whose config
-    model declares an ``llm`` field). Only fields explicitly set in the
-    override (via YAML or environment variables) replace the defaults;
-    unset fields inherit the global values.
-    """
-    tool_cfg = cfg.tools.get(tool_name)
-    override = getattr(tool_cfg, "llm", None)
-    if override is None:
-        return cfg.llm
-
-    base = cfg.llm.model_dump()
-    for field in override.model_fields_set:
-        base[field] = getattr(override, field)
-    return LLMConfig(**base)
 
 
 def _load_env_overrides(prefix: str = "QUANT_AGENT_") -> dict[str, Any]:

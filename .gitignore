@@ -27,8 +27,3 @@ config.yaml
 .worktrees/
 .superpowers/
 uv.lock
-
-# Generated agent workspace files (python -m runtime.cli init-workspace)
-CLAUDE.md
-AGENTS.md
-.agents/

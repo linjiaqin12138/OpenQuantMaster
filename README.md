@@ -1,6 +1,6 @@
 # OpenQuantMaster
 
-Agent-first quantitative trading daemon.
+Pipeline + tool quantitative trading daemon. Workflows are YAML pipelines that call registered tools — no external agent inheritance.
 
 ## Development setup
 
@@ -46,21 +46,10 @@ market_data:
     tushare_token: ""
     yfinance_timeout: 30
 
-vibe_trading:
-  mode: cli
-  cli_path: vibe-trading
-  mcp_command: vibe-trading-mcp
-  mcp_url: stdio
-  http_url: http://localhost:8000
-  auto_start_mcp: true
-  read_only: true
-  allowed_capabilities:
-    - backtest
-    - research
-    - alpha_bench
-    - swarm
-    - hypothesis
-    - web_search
+notifier:
+  pushplus:
+    enabled: true
+    token: ""
 ```
 
 ### Configuration sections
@@ -69,7 +58,7 @@ vibe_trading:
 - `scheduler` — default timezone for cron-triggered pipelines.
 - `market_data.crypto` — default crypto exchange and optional API keys.
 - `market_data.equities` — `tushare_token` for A-share data and `yfinance_timeout` for US/HK equities.
-- `vibe_trading` — transport and security settings for the unified `vibe_tool` (`cli`, `mcp`, or `http`).
+- `notifier` — PushPlus / Telegram / email notification channels.
 
 ### Environment variables
 
@@ -98,7 +87,14 @@ quantmaster-run hello_pipeline
 ```bash
 quantmaster-daemon --preflight                  # Check startup health and exit
 quantmaster-daemon --run hello_pipeline         # Run one pipeline and exit
-quantmaster-daemon --run backtest_demo --config ./config.yaml
+quantmaster-daemon --run market_open_review --config ./config.yaml
+```
+
+### Tool CLI
+
+```bash
+python -m runtime.cli list-tools
+python -m runtime.cli tool echo_tool --inputs '{"message":"hi","repeat":1}'
 ```
 
 ## Pipeline manifests
@@ -141,9 +137,9 @@ stages:
 
 Cron expressions use the standard 5-field format: `minute hour day month day_of_week`. On startup the daemon automatically loads all `pipelines/*.yaml` files and registers cron jobs with APScheduler.
 
-## Milestone 2 tools
+## Tools
 
-Tools are auto-discovered from the `tools/` package via `pkgutil.walk_packages`. Milestone 2 adds market data and research tools.
+Tools are auto-discovered from the `tools/` package via `pkgutil.walk_packages`.
 
 ### `ohlcv_tool`
 
@@ -190,125 +186,12 @@ quantmaster-run crypto_15m_data
 
 Output is a CSV artifact stored under `./artifacts/<run_id>/fetch_sol/ohlcv_SOLUSDT.P_15m.csv`.
 
-### `vibe_tool`
+### Other built-in tools
 
-Unified gateway to [Vibe-Trading](https://github.com/HKUDS/Vibe-Trading). It exposes Vibe-Trading capabilities (backtest, research, alpha bench, swarm, etc.) as a single OQM tool. Transport is controlled by `vibe_trading.mode` in `config.yaml`.
-
-**Dependency**
-
-```bash
-pip install -e ".[vibe]"
-# or standalone
-pip install vibe-trading-ai
-```
-
-**Configuring the LLM provider**
-
-Vibe-Trading reads provider credentials from `~/.vibe-trading/.env`. Create that
-file and uncomment exactly one provider block:
-
-```bash
-mkdir -p ~/.vibe-trading
-
-cat > ~/.vibe-trading/.env <<EOF
-LANGCHAIN_PROVIDER=deepseek
-LANGCHAIN_MODEL_NAME=deepseek-v4-pro
-DEEPSEEK_API_KEY=sk-...
-DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-EOF
-
-chmod 600 ~/.vibe-trading/.env
-```
-
-Other supported providers use the same pattern (`openrouter`, `openai`, `ollama`).
-
-Verify the configuration:
-
-```bash
-vibe-trading provider doctor
-```
-
-**Inputs**
-
-| Field     | Required | Description                                                        |
-|-----------|----------|--------------------------------------------------------------------|
-| capability | yes      | Vibe-Trading capability: `backtest`, `research`, `alpha_bench`, `swarm`, `hypothesis`, `web_search`, or raw MCP tool name. |
-| inputs    | no       | Capability-specific arguments.                                     |
-| mode      | no       | Override `vibe_trading.mode` (`cli`, `http`, or `mcp`).            |
-| timeout_sec | no     | Per-call timeout.                                                  |
-
-**Example pipeline**
-
-```yaml
-name: backtest_demo
-version: "1.0"
-description: Research-only backtest runner.
-trigger:
-  type: manual
-stages:
-  - name: backtest
-    tool: vibe_tool
-    inputs:
-      capability: "backtest"
-      inputs:
-        strategy_description: "dual EMA on SOLUSDT.P"
-        market: "crypto"
-        symbols: ["SOLUSDT.P"]
-        start: "2026-01-01"
-        end: "2026-06-30"
-```
-
-For deterministic replay of an existing Vibe-Trading run:
-
-```yaml
-stages:
-  - name: backtest
-    tool: vibe_tool
-    inputs:
-      capability: "backtest"
-      inputs:
-        run_dir: "./vibe_runs/dual_ema_v1_20260716_080000"
-```
-
-Artifacts produced by `backtest`: `equity.csv`, `trades.csv`, `metrics.csv`, and `run_card.json`.
-
-### `signal_scan_tool`
-
-Scan a `vibe_runs/` directory for the latest Vibe-Trading run that matches a `strategy_id`, normalize its `signals.json`, and emit a JSON artifact.
-
-**Inputs**
-
-| Field       | Required | Description                                  |
-|-------------|----------|----------------------------------------------|
-| watch_dir   | yes      | Directory to scan for run folders.           |
-| strategy_id | yes      | Strategy ID to match in `run_card.json`.     |
-| market      | yes      | Default market for signals without one.      |
-
-**Example pipeline**
-
-```yaml
-name: crypto_signal_fired
-version: "1.0"
-description: 15-minute crypto scan using CCXT data and Vibe-Trading signals.
-trigger:
-  type: cron
-  cron: "*/15 * * * *"
-  timezone: UTC
-stages:
-  - name: fetch_ohlcv
-    tool: ohlcv_tool
-    inputs:
-      symbol: "SOLUSDT.P"
-      market: "crypto"
-      interval: "15m"
-
-  - name: scan_signals
-    tool: signal_scan_tool
-    inputs:
-      strategy_id: "dual_ema_v1"
-      market: "crypto"
-      watch_dir: "./vibe_runs"
-```
+- `indicator_tool` — compute technical indicators from OHLCV artifacts (see `docs/tools/indicator_tool.md`).
+- `notify_tool` — send notifications via configured channels.
+- `parallel_tool` — run multiple registered tools concurrently.
+- `echo_tool` / `demo_data_tool` — smoke and demo helpers.
 
 ## Inspecting results
 
@@ -320,26 +203,12 @@ Each pipeline run writes artifacts under:
 ./artifacts/<pipeline_run_id>/<stage_name>/<artifact_name>
 ```
 
-For example:
-
-```bash
-ls ./artifacts/$(ls ./artifacts | tail -n 1)/fetch_sol/
-```
-
 ### Pipeline runs in the database
 
 Pipeline runs, stage runs, artifact references, and signals are persisted in `./data/runtime.db` (SQLite). You can query them directly:
 
 ```bash
 sqlite3 ./data/runtime.db "SELECT id, name, status, created_at FROM pipeline_runs ORDER BY created_at DESC LIMIT 10;"
-```
-
-### Signals
-
-Signals generated by `signal_scan_tool` are stored in the `signals` table. Query the latest signals for a strategy:
-
-```bash
-sqlite3 ./data/runtime.db "SELECT strategy_id, symbol, side, strength, status, triggered_at FROM signals ORDER BY triggered_at DESC LIMIT 10;"
 ```
 
 ## Testing and linting
@@ -367,15 +236,16 @@ Test markers are configured in `pyproject.toml`:
 
 ```
 .
-├── config.yaml              # Default runtime configuration
+├── config.yaml.example      # Sample runtime configuration
 ├── pipelines/               # Pipeline manifests
 ├── runtime/                 # Daemon, scheduler, state store, runner
 ├── schemas/                 # JSON schemas for contracts
-├── skills/                  # Agent skill definitions
+├── skills/                  # Coding-assistant guides
 ├── tools/                   # Tool implementations
-│   ├── demo/                # echo_tool
-│   ├── market_data/         # ohlcv_tool
-│   └── research/            # backtest_tool, signal_scan_tool
+│   ├── demo/                # echo_tool, demo_data_tool
+│   ├── market_data/         # ohlcv_tool, indicator_tool
+│   ├── notifier/            # notify_tool
+│   └── runtime/             # parallel_tool
 └── tests/                   # pytest suite
 ```
 

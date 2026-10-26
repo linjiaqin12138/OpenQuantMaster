@@ -6,14 +6,12 @@ from types import ModuleType
 
 import structlog
 
-from runtime.agent_gateway.agent_driver import AgentDriver
 from runtime.config_loader import RuntimeConfig, load_config
 from runtime.event_bus.memory_bus import MemoryEventBus
 from runtime.notifier.composite import CompositeNotifier, build_notifier
 from runtime.pipeline_runner.runner import PipelineRunner
 from runtime.scheduler.apscheduler_adapter import APSchedulerAdapter
 from runtime.state_store.database import StateStore
-from tools.agent.agent_tool import AgentTool
 from tools.base.tool_registry import ToolRegistry
 from tools.notifier.notify_tool import NotifyTool
 from tools.runtime.parallel_tool import ParallelTool
@@ -33,7 +31,6 @@ class BootstrapResult:
     registry: ToolRegistry
     scheduler: APSchedulerAdapter
     runner: PipelineRunner
-    agent_driver: AgentDriver
     notifier: CompositeNotifier
 
 
@@ -43,11 +40,6 @@ async def bootstrap(config_path: Path | str | None = None, package: ModuleType |
         config = load_config(config_path)
     except Exception as exc:
         raise StartupError(f"Failed to load configuration: {exc}") from exc
-
-    # Default the agent subprocess workdir to the config file's directory so
-    # the CLI discovers .claude/ or AGENTS.md even when the daemon runs elsewhere.
-    if not config.agent.workdir and config.config_path is not None:
-        config.agent.workdir = str(config.config_path.resolve().parent)
 
     try:
         store = StateStore(database_url=config.database_url, artifacts_path=config.paths.artifacts)
@@ -82,11 +74,7 @@ async def bootstrap(config_path: Path | str | None = None, package: ModuleType |
         raise StartupError(f"Failed to start scheduler: {exc}") from exc
 
     try:
-        agent_driver = AgentDriver(config.agent)
         notifier = build_notifier(config.notifier)
-        registry.register(
-            AgentTool(agent_driver=agent_driver, artifacts_path=config.paths.artifacts)
-        )
         registry.register(NotifyTool(notifier=notifier))
         registry.register(ParallelTool(registry=registry))
         runner = PipelineRunner(
@@ -94,7 +82,6 @@ async def bootstrap(config_path: Path | str | None = None, package: ModuleType |
             store=store,
             bus=bus,
             registry=registry,
-            agent_driver=agent_driver,
             notifier=notifier,
         )
         scheduler.register_executor(runner)
@@ -118,6 +105,5 @@ async def bootstrap(config_path: Path | str | None = None, package: ModuleType |
         registry=registry,
         scheduler=scheduler,
         runner=runner,
-        agent_driver=agent_driver,
         notifier=notifier,
     )

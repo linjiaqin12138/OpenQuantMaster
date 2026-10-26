@@ -1,14 +1,14 @@
 [project]
 name = "OpenQuantMaster"
 version = "0.1.0"
-description = "Agent-first quantitative trading daemon"
+description = "Pipeline + tool quantitative trading daemon"
 requires-python = ">=3.12"
 license = {text = "MIT"}
 readme = "README.md"
 authors = [
     {name = "linjiaqin12138", email = "JiaqinLin@outlook.com"},
 ]
-keywords = ["quantitative", "trading", "agent", "asyncio", "pipeline"]
+keywords = ["quantitative", "trading", "pipeline", "asyncio", "tools"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Financial and Insurance Industry",
@@ -23,7 +23,7 @@ dependencies = [
     "pydantic>=2.7.0",
     "pydantic-settings>=2.3.0",
     "pyyaml>=6.0.1",
-    "sqlalchemy>=2.0.30",
+    "sqlalchemy[asyncio]>=2.0.30",
     "structlog>=24.1.0",
     "ccxt>=4.3.0",
     "yfinance>=0.2.40",
@@ -32,8 +32,6 @@ dependencies = [
     "pandas>=2.2.0",
     "ta-lib>=0.7.0",
     "httpx>=0.27.0",
-    "litellm>=1.40.0",
-    "tenacity>=8.3.0",
 ]
 
 [project.urls]
@@ -50,9 +48,6 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23.0",
     "httpx>=0.27.0",
-]
-vibe = [
-    "vibe-trading-ai>=0.1.10",
 ]
 
 [tool.setuptools]
