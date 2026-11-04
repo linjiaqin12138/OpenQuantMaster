@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import signal
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 
@@ -12,7 +13,7 @@ import structlog
 from runtime.bootstrap import StartupError, bootstrap
 from runtime.config_loader import load_config
 from runtime.logging_config import configure_logging
-from runtime.state_store.models import RunStatus
+from runtime.services.pipeline_service import PipelineService
 
 logger = structlog.get_logger()
 
@@ -28,7 +29,12 @@ class Daemon:
         run_pipeline: str | None,
         preflight: bool,
         package: ModuleType,
+        on_message: Callable[[str], None] | None = None,
     ) -> int:
+        def emit(message: str) -> None:
+            if on_message is not None:
+                on_message(message)
+
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, self._request_shutdown)
@@ -46,24 +52,24 @@ class Daemon:
         )
 
         if preflight:
-            click.echo("Preflight checks passed.")
+            emit("Preflight checks passed.")
             await self._shutdown()
             return 0
 
         if run_pipeline:
-            run_id = await self._app.scheduler.run_now(run_pipeline)
-            click.echo(f"Started pipeline run: {run_id}")
-            # Wait for runner to finish by polling store status
-            while True:
-                run = await self._app.store.get_pipeline_run(run_id)
-                if run and run.status in ("completed", "failed"):
-                    break
-                await asyncio.sleep(0.05)
-            click.echo(f"Pipeline '{run_pipeline}' finished with status: {run.status.value}")
+            pipeline_service = PipelineService(
+                scheduler=self._app.scheduler,
+                store=self._app.store,
+            )
+            result = await pipeline_service.run({"pipeline_name": run_pipeline, "wait": True})
+            run_id = result.data.get("run_id", "")
+            status = result.data.get("status", "unknown")
+            emit(f"Started pipeline run: {run_id}")
+            emit(f"Pipeline '{run_pipeline}' finished with status: {status}")
             await self._shutdown()
-            return 0 if run.status == RunStatus.completed else 1
+            return 0 if result.success else 1
 
-        click.echo("Daemon running. Press Ctrl+C to stop.")
+        emit("Daemon running. Press Ctrl+C to stop.")
         await self._shutdown_event.wait()
         await self._shutdown()
         return 0
@@ -96,7 +102,15 @@ def main(run_pipeline: str | None, config_path: Path | None, preflight: bool) ->
     cfg = load_config(config_path)
     configure_logging(cfg)
     daemon = Daemon()
-    exit_code = asyncio.run(daemon.run(config_path, run_pipeline, preflight, package=tools))
+    exit_code = asyncio.run(
+        daemon.run(
+            config_path,
+            run_pipeline,
+            preflight,
+            package=tools,
+            on_message=click.echo,
+        )
+    )
     if exit_code:
         raise click.ClickException(f"Exit code: {exit_code}")
 

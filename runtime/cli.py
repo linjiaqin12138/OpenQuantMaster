@@ -9,8 +9,15 @@ import click
 from runtime.config_loader import load_config
 from runtime.daemon import Daemon
 from runtime.logging_config import configure_logging
+from runtime.services.echo_service import EchoService
 from tools.base.tool_registry import ToolRegistry
 from tools.runtime.parallel_tool import ParallelTool
+
+# Transitional CLI aliases: protocol tool names → service constructors.
+_SERVICE_BY_PROTOCOL_NAME: dict[str, type] = {
+    "echo": EchoService,
+    "echo_tool": EchoService,
+}
 
 
 def _build_registry() -> ToolRegistry:
@@ -37,7 +44,15 @@ def run_pipeline(pipeline_name: str, config_path: Path | None) -> None:
     cfg = load_config(config_path)
     configure_logging(cfg)
     daemon = Daemon()
-    exit_code = asyncio.run(daemon.run(config_path, pipeline_name, preflight=False, package=tools))
+    exit_code = asyncio.run(
+        daemon.run(
+            config_path,
+            pipeline_name,
+            preflight=False,
+            package=tools,
+            on_message=click.echo,
+        )
+    )
     if exit_code:
         raise click.ClickException(f"Pipeline failed with exit code: {exit_code}")
 
@@ -49,9 +64,19 @@ def run_pipeline(pipeline_name: str, config_path: Path | None) -> None:
 def tool(tool_name: str, inputs: str, config_path: Path | None) -> None:
     cfg = load_config(config_path)
     configure_logging(cfg)
+    parsed = json.loads(inputs)
+
+    service_cls = _SERVICE_BY_PROTOCOL_NAME.get(tool_name)
+    if service_cls is not None:
+        result = asyncio.run(service_cls().run(parsed))
+        click.echo(result.model_dump_json())
+        if not result.success:
+            raise click.ClickException(result.error or "Service failed")
+        return
+
+    # Unmigrated tools: transitional registry path (tool shells should delegate to services).
     registry = _build_registry()
     discovered_tool = registry.get(tool_name)
-    parsed = json.loads(inputs)
     result = asyncio.run(discovered_tool.execute(parsed))
     click.echo(result.model_dump_json())
 

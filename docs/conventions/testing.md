@@ -2,11 +2,12 @@
 
 ## Goals
 
-Tests should survive internal refactors. Prefer stable **public surfaces** (CLI, tool `--inputs` contract, SDK APIs) over private helpers.
+Tests should survive internal refactors. Prefer stable **public surfaces** — **CLI** (protocol), **Service** (programmable API with documented Pydantic I/O), tool `--inputs` contract during transition, and external SDK APIs — over private helpers.
 
 ## Prefer entrypoints
 
-- Drive behavior through the **CLI entry** (or other documented public API), not by importing and calling internal helpers.
+- Drive **orchestration** behavior through a **Service** or the **CLI entry**, not by importing and calling internal helpers.
+- **Operation** unit tests may call a single atomic Operation directly when asserting pure logic or one I/O boundary; do not use that shortcut for multi-step workflows (those belong under Service or CLI tests).
 - For tools, the stable entry is:
 
   ```bash
@@ -29,8 +30,10 @@ Tests should survive internal refactors. Prefer stable **public surfaces** (CLI,
 
 | Layer | Patch? | Instead |
 |-------|--------|---------|
-| CLI / tool public inputs | No | Invoke CLI |
-| Internal helpers / resolvers | No | Reach them via entry + config |
+| CLI / Service public I/O | No | Invoke CLI or Service with fixture inputs |
+| Tool public `--inputs` (transitional) | No | Invoke CLI `tool` subcommand |
+| Atomic Operation (unit) | No | Call Operation directly; assert return value |
+| Internal helpers / resolvers | No | Reach them via Service, CLI, or entry + config |
 | External SDK (`ccxt`, etc.) | Yes, when the test would otherwise hit the network | Fake SDK module / exchange class |
 | Pure logic | No | Assert outputs |
 | DB / StateStore | No | Temp DB + seed data |

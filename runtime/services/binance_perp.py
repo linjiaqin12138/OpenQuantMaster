@@ -4,8 +4,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from tools.base.base_tool import BaseTool
-from tools.base.tool_result import ToolResult
+from runtime.services.base import BaseService, ServiceResult
 
 Action = Literal[
     "balance",
@@ -46,6 +45,22 @@ CONDITIONAL_STOP_TYPES: frozenset[str] = frozenset(
         "take_profit",
     }
 )
+
+# Adapter map only — callers use logical exchange/product names.
+_CCXT_EXCHANGE_IDS: dict[tuple[str, str], str] = {
+    ("binance", "spot"): "binance",
+    ("binance", "usdm"): "binanceusdm",
+}
+
+
+class BinancePerpConfig(BaseModel):
+    """Parameters this service needs; not the full runtime config."""
+
+    exchange: str = "binance"
+    product: Literal["spot", "usdm"] = "usdm"
+    sandbox: bool = True
+    api_key: str = ""
+    secret: str = ""
 
 
 class BinancePerpInput(BaseModel):
@@ -108,10 +123,6 @@ class BinancePerpInput(BaseModel):
         elif action == "set_position_mode":
             if self.hedge is None:
                 raise ValueError("set_position_mode requires hedge (true=hedge, false=one-way)")
-        elif action in ("positions", "open_orders"):
-            pass  # symbol optional
-        elif action == "balance":
-            pass
         return self
 
 
@@ -120,47 +131,35 @@ class BinancePerpOutput(BaseModel):
     dry_run: bool
     exchange: str
     product: str
-    ccxt_id: str
     sandbox: bool
     planned: dict[str, Any] | None = None
     result: dict[str, Any] | list[Any] | None = None
 
 
-class BinancePerpTool(BaseTool):
-    name: ClassVar[str] = "binance_perp_tool"
-    version: ClassVar[str] = "0.2.0"
-    capability: ClassVar[str] = "execution"
-    cost_estimate_usd: ClassVar[float] = 0.0
-    fallback_tools: ClassVar[list[str]] = []
+class BinancePerp(BaseService):
     input_model: ClassVar[type[BaseModel]] = BinancePerpInput
     output_model: ClassVar[type[BaseModel]] = BinancePerpOutput
 
-    async def _execute(self, inputs: dict[str, Any]) -> ToolResult:
-        from runtime.config_loader import load_config
-        from runtime.exchange_resolve import resolve_exchange
+    def __init__(self, cfg: BinancePerpConfig) -> None:
+        self.cfg = cfg
 
-        parsed = BinancePerpInput(**inputs)
-        cfg = load_config()
-        exec_cfg = cfg.execution.binance_perp
-        resolved = resolve_exchange(cfg, exec_cfg.exchange, exec_cfg.product)
-
+    async def _run(self, inputs: BinancePerpInput) -> ServiceResult:
         meta = {
-            "action": parsed.action,
-            "dry_run": parsed.dry_run,
-            "exchange": resolved.exchange,
-            "product": resolved.product,
-            "ccxt_id": resolved.ccxt_id,
-            "sandbox": resolved.sandbox,
+            "action": inputs.action,
+            "dry_run": inputs.dry_run,
+            "exchange": self.cfg.exchange,
+            "product": self.cfg.product,
+            "sandbox": self.cfg.sandbox,
         }
 
-        if parsed.action in WRITE_ACTIONS and parsed.dry_run:
-            planned = self._planned_payload(parsed)
+        if inputs.action in WRITE_ACTIONS and inputs.dry_run:
+            planned = self._planned_payload(inputs)
             output = self.output_model(**meta, planned=planned, result=None)
-            return ToolResult(success=True, data=output.model_dump())
+            return ServiceResult(success=True, data=output.model_dump())
 
-        result_payload = await self._run_exchange(resolved, parsed)
+        result_payload = await self._run_exchange(inputs)
         output = self.output_model(**meta, planned=None, result=result_payload)
-        return ToolResult(success=True, data=output.model_dump())
+        return ServiceResult(success=True, data=output.model_dump())
 
     def _planned_payload(self, parsed: BinancePerpInput) -> dict[str, Any]:
         payload: dict[str, Any] = {"action": parsed.action}
@@ -188,16 +187,32 @@ class BinancePerpTool(BaseTool):
                 payload[field] = value
         return payload
 
-    async def _run_exchange(self, resolved: Any, parsed: BinancePerpInput) -> dict[str, Any] | list[Any]:
+    def _adapter_id(self) -> str:
+        adapter_id = _CCXT_EXCHANGE_IDS.get((self.cfg.exchange, self.cfg.product))
+        if adapter_id is None:
+            raise ValueError(
+                f"Unsupported venue: exchange={self.cfg.exchange!r} product={self.cfg.product!r}"
+            )
+        return adapter_id
+
+    async def _run_exchange(self, parsed: BinancePerpInput) -> dict[str, Any] | list[Any]:
         import ccxt.async_support as ccxt
 
-        exchange_class = getattr(ccxt, resolved.ccxt_id, None)
+        adapter_id = self._adapter_id()
+        exchange_class = getattr(ccxt, adapter_id, None)
         if exchange_class is None:
-            raise ValueError(f"Unsupported exchange: {resolved.ccxt_id}")
+            raise ValueError(
+                f"Exchange adapter unavailable for venue: {self.cfg.exchange}/{self.cfg.product}"
+            )
 
-        exchange = exchange_class(resolved.ccxt_options())
+        options: dict[str, str | bool] = {"enableRateLimit": True}
+        if self.cfg.api_key:
+            options["apiKey"] = self.cfg.api_key
+        if self.cfg.secret:
+            options["secret"] = self.cfg.secret
+        exchange = exchange_class(options)
         try:
-            if resolved.sandbox and hasattr(exchange, "set_sandbox_mode"):
+            if self.cfg.sandbox and hasattr(exchange, "set_sandbox_mode"):
                 await exchange.set_sandbox_mode(True)
 
             action = parsed.action
@@ -233,11 +248,6 @@ class BinancePerpTool(BaseTool):
     async def _fetch_open_orders(
         self, exchange: Any, parsed: BinancePerpInput
     ) -> list[dict[str, Any]]:
-        """Fetch resting orders and optionally Binance algo/conditional orders.
-
-        USDM stop/TP live on the algo endpoint; CCXT exposes them via
-        ``fetch_open_orders(..., params={"stop": True})``.
-        """
         resting = await exchange.fetch_open_orders(parsed.symbol)
         trimmed = [self._trim_order(o, order_kind="resting") for o in resting]
         if not parsed.include_conditional:
@@ -303,7 +313,9 @@ class BinancePerpTool(BaseTool):
                 }
                 for asset in assets
             },
-            "info_keys": sorted(raw.get("info", {}).keys()) if isinstance(raw.get("info"), dict) else [],
+            "info_keys": sorted(raw.get("info", {}).keys())
+            if isinstance(raw.get("info"), dict)
+            else [],
         }
 
     def _trim_position(self, raw: dict[str, Any]) -> dict[str, Any]:
@@ -347,7 +359,9 @@ class BinancePerpTool(BaseTool):
             "remaining": raw.get("remaining"),
             "status": raw.get("status"),
             "reduceOnly": raw.get("reduceOnly"),
-            "stopPrice": raw.get("stopPrice") if raw.get("stopPrice") is not None else raw.get("triggerPrice"),
+            "stopPrice": raw.get("stopPrice")
+            if raw.get("stopPrice") is not None
+            else raw.get("triggerPrice"),
             "workingType": info.get("workingType"),
             "algoStatus": info.get("algoStatus"),
             "closePosition": close_position,
@@ -369,7 +383,6 @@ class BinancePerpTool(BaseTool):
         info: dict[str, Any],
         order_kind: str,
     ) -> Any:
-        # CCXT normalizes conditional stops to type="market"; prefer venue orderType.
         if order_kind == "conditional":
             venue_type = info.get("orderType")
             if isinstance(venue_type, str) and venue_type:

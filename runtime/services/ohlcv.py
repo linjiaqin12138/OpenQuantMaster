@@ -8,10 +8,30 @@ import pandas as pd
 import structlog
 from pydantic import BaseModel, Field
 
-from tools.base.base_tool import BaseTool
-from tools.base.tool_result import ArtifactRef, ToolResult
+from runtime.services.base import BaseService, ServiceResult
 
 logger = structlog.get_logger()
+
+# Adapter map only — callers use logical exchange/product names.
+_CCXT_EXCHANGE_IDS: dict[tuple[str, str], str] = {
+    ("binance", "spot"): "binance",
+    ("binance", "usdm"): "binanceusdm",
+}
+
+
+class OHLCVCryptoConfig(BaseModel):
+    exchange: str = "binance"
+    product: Literal["spot", "usdm"] = "spot"
+    sandbox: bool = False
+    api_key: str = ""
+    secret: str = ""
+
+
+class OHLCVConfig(BaseModel):
+    """Parameters this service needs; not the full runtime config."""
+
+    crypto: OHLCVCryptoConfig = Field(default_factory=OHLCVCryptoConfig)
+    tushare_token: str = ""
 
 
 class OHLCVInput(BaseModel):
@@ -29,85 +49,73 @@ class OHLCVOutput(BaseModel):
     market: str
     interval: str
     rows: int
-    artifact: str
+    bars: list[dict[str, Any]]
 
 
-class OHLCVTool(BaseTool):
-    name: ClassVar[str] = "ohlcv_tool"
-    version: ClassVar[str] = "0.1.0"
-    capability: ClassVar[str] = "market_data"
-    cost_estimate_usd: ClassVar[float] = 0.0
-    fallback_tools: ClassVar[list[str]] = []
+class OHLCV(BaseService):
     input_model: ClassVar[type[BaseModel]] = OHLCVInput
     output_model: ClassVar[type[BaseModel]] = OHLCVOutput
 
-    async def _execute(self, inputs: dict[str, Any]) -> ToolResult:
-        from runtime.config_loader import load_config
+    def __init__(self, cfg: OHLCVConfig) -> None:
+        self.cfg = cfg
 
-        cfg = load_config()
-        symbol = inputs["symbol"]
-        market = inputs["market"]
-        interval = inputs["interval"]
-        source = inputs.get("source")
+    async def _run(self, inputs: OHLCVInput) -> ServiceResult:
+        symbol = inputs.symbol
+        market = inputs.market
+        interval = inputs.interval
+        source = inputs.source
 
         if market == "crypto" or source == "ccxt":
-            df = await self._fetch_crypto(cfg, symbol, interval, inputs)
+            df = await self._fetch_crypto(inputs)
         elif market in ("us_equity", "hk_equity") or source == "yfinance":
-            df = await asyncio.to_thread(self._fetch_yfinance, symbol, interval, inputs)
+            df = await asyncio.to_thread(self._fetch_yfinance, inputs)
         elif market == "a_share":
-            df = await self._fetch_a_share(cfg, symbol, interval, inputs)
+            df = await self._fetch_a_share(inputs)
         else:
-            return ToolResult(success=False, error=f"Unsupported market: {market}")
+            return ServiceResult(success=False, error=f"Unsupported market: {market}")
 
-        csv_content = self._dataframe_to_csv(df)
-        artifact_name = f"ohlcv_{symbol.replace('/', '_')}_{interval}.csv"
-        artifact = ArtifactRef(
-            name=artifact_name,
-            mime_type="text/csv",
-            relative_path=artifact_name,
-            sha256="",  # runner fills real hash from content
-            content=csv_content,
-        )
+        bars = self._dataframe_to_bars(df)
         output = self.output_model(
             symbol=symbol,
             market=market,
             interval=interval,
-            rows=len(df),
-            artifact=artifact_name,
+            rows=len(bars),
+            bars=bars,
         )
-        return ToolResult(success=True, data=output.model_dump(), artifacts=[artifact])
+        return ServiceResult(success=True, data=output.model_dump())
 
-    async def _fetch_crypto(
-        self,
-        cfg: Any,
-        symbol: str,
-        interval: str,
-        inputs: dict[str, Any],
-    ) -> pd.DataFrame:
+    async def _fetch_crypto(self, inputs: OHLCVInput) -> pd.DataFrame:
         import ccxt.async_support as ccxt
 
-        from runtime.exchange_resolve import resolve_exchange
-
-        crypto = cfg.market_data.crypto
-        resolved = resolve_exchange(cfg, crypto.exchange, crypto.product)
-        exchange_class = getattr(ccxt, resolved.ccxt_id, None)
+        crypto = self.cfg.crypto
+        adapter_id = _CCXT_EXCHANGE_IDS.get((crypto.exchange, crypto.product))
+        if adapter_id is None:
+            raise ValueError(
+                f"Unsupported crypto venue: exchange={crypto.exchange!r} product={crypto.product!r}"
+            )
+        exchange_class = getattr(ccxt, adapter_id, None)
         if exchange_class is None:
-            raise ValueError(f"Unsupported crypto exchange: {resolved.ccxt_id}")
+            raise ValueError(f"Crypto adapter unavailable for venue: {crypto.exchange}/{crypto.product}")
 
-        exchange = exchange_class(resolved.ccxt_options())
-        if resolved.sandbox:
-            if hasattr(exchange, "set_sandbox_mode"):
-                await exchange.set_sandbox_mode(True)
+        options: dict[str, str | bool] = {"enableRateLimit": True}
+        if crypto.api_key:
+            options["apiKey"] = crypto.api_key
+        if crypto.secret:
+            options["secret"] = crypto.secret
+        exchange = exchange_class(options)
+        if crypto.sandbox and hasattr(exchange, "set_sandbox_mode"):
+            await exchange.set_sandbox_mode(True)
 
-        start_ms = self._iso_to_ms(inputs.get("start"))
-        end_ms = self._iso_to_ms(inputs.get("end"))
-        limit = inputs.get("limit", 1000)
+        start_ms = self._iso_to_ms(inputs.start)
+        end_ms = self._iso_to_ms(inputs.end)
+        limit = inputs.limit
         try:
             if start_ms is not None:
-                since = start_ms
-                raw = await exchange.fetch_ohlcv(symbol, interval, since=since, limit=limit)
+                raw = await exchange.fetch_ohlcv(
+                    inputs.symbol, inputs.interval, since=start_ms, limit=limit
+                )
             else:
-                raw = await exchange.fetch_ohlcv(symbol, interval, limit=limit)
+                raw = await exchange.fetch_ohlcv(inputs.symbol, inputs.interval, limit=limit)
         finally:
             await exchange.close()
 
@@ -117,22 +125,17 @@ class OHLCVTool(BaseTool):
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
         return df
 
-    def _fetch_yfinance(
-        self,
-        symbol: str,
-        interval: str,
-        inputs: dict[str, Any],
-    ) -> pd.DataFrame:
+    def _fetch_yfinance(self, inputs: OHLCVInput) -> pd.DataFrame:
         import yfinance as yf
 
-        ticker = yf.Ticker(symbol)
-        kwargs: dict[str, Any] = {"interval": interval}
-        if inputs.get("start"):
-            kwargs["start"] = inputs["start"][:10]
-        if inputs.get("end"):
-            kwargs["end"] = inputs["end"][:10]
+        ticker = yf.Ticker(inputs.symbol)
+        kwargs: dict[str, Any] = {"interval": inputs.interval}
+        if inputs.start:
+            kwargs["start"] = inputs.start[:10]
+        if inputs.end:
+            kwargs["end"] = inputs.end[:10]
         if not kwargs.get("start"):
-            kwargs["period"] = "max" if inputs.get("limit", 1000) > 100 else "1y"
+            kwargs["period"] = "max" if inputs.limit > 100 else "1y"
         hist = ticker.history(**kwargs)
         hist = hist.reset_index()
         hist = hist.rename(
@@ -149,45 +152,31 @@ class OHLCVTool(BaseTool):
         hist["timestamp"] = pd.to_datetime(hist["timestamp"], utc=True)
         return hist[["timestamp", "open", "high", "low", "close", "volume"]]
 
-    async def _fetch_a_share(
-        self,
-        cfg: Any,
-        symbol: str,
-        interval: str,
-        inputs: dict[str, Any],
-    ) -> pd.DataFrame:
-        source = inputs.get("source")
-        token = cfg.market_data.equities.tushare_token
+    async def _fetch_a_share(self, inputs: OHLCVInput) -> pd.DataFrame:
+        source = inputs.source
+        token = self.cfg.tushare_token
         if source == "tushare" or (source is None and token):
             try:
-                return await asyncio.to_thread(
-                    self._fetch_tushare, symbol, interval, inputs, token
-                )
+                return await asyncio.to_thread(self._fetch_tushare, inputs, token)
             except Exception as exc:
                 logger.warning(
                     "ohlcv.tushare_failed",
-                    symbol=symbol,
-                    interval=interval,
+                    symbol=inputs.symbol,
+                    interval=inputs.interval,
                     error=str(exc),
                 )
                 if source == "tushare":
                     raise
-        return await asyncio.to_thread(self._fetch_akshare, symbol, interval, inputs)
+        return await asyncio.to_thread(self._fetch_akshare, inputs)
 
-    def _fetch_tushare(
-        self,
-        symbol: str,
-        interval: str,
-        inputs: dict[str, Any],
-        token: str,
-    ) -> pd.DataFrame:
+    def _fetch_tushare(self, inputs: OHLCVInput, token: str) -> pd.DataFrame:
         import tushare as ts
 
         ts.set_token(token)
         pro = ts.pro_api()
-        start = inputs.get("start", "")[:10].replace("-", "")
-        end = inputs.get("end", "")[:10].replace("-", "")
-        df = pro.daily(ts_code=symbol, start_date=start or None, end_date=end or None)
+        start = (inputs.start or "")[:10].replace("-", "")
+        end = (inputs.end or "")[:10].replace("-", "")
+        df = pro.daily(ts_code=inputs.symbol, start_date=start or None, end_date=end or None)
         df = df.rename(
             columns={
                 "trade_date": "timestamp",
@@ -202,19 +191,14 @@ class OHLCVTool(BaseTool):
         df = df[["timestamp", "open", "high", "low", "close", "volume"]]
         return df.sort_values("timestamp").reset_index(drop=True)
 
-    def _fetch_akshare(
-        self,
-        symbol: str,
-        interval: str,
-        inputs: dict[str, Any],
-    ) -> pd.DataFrame:
+    def _fetch_akshare(self, inputs: OHLCVInput) -> pd.DataFrame:
         import akshare as ak
 
         # Strip exchange suffix, e.g. 000001.SZ -> 000001
-        code = symbol.split(".")[0]
-        start = inputs.get("start", "")[:10].replace("-", "")
-        end = inputs.get("end", "")[:10].replace("-", "")
-        period = self._map_akshare_period(interval)
+        code = inputs.symbol.split(".")[0]
+        start = (inputs.start or "")[:10].replace("-", "")
+        end = (inputs.end or "")[:10].replace("-", "")
+        period = self._map_akshare_period(inputs.interval)
         df = ak.stock_zh_a_hist(
             symbol=code,
             period=period,
@@ -235,8 +219,13 @@ class OHLCVTool(BaseTool):
         df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
         return df[["timestamp", "open", "high", "low", "close", "volume"]]
 
-    def _dataframe_to_csv(self, df: pd.DataFrame) -> str:
-        return df.to_csv(index=False)
+    def _dataframe_to_bars(self, df: pd.DataFrame) -> list[dict[str, Any]]:
+        out = df.copy()
+        if "timestamp" in out.columns:
+            out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True).dt.strftime(
+                "%Y-%m-%dT%H:%M:%S%z"
+            )
+        return out.to_dict(orient="records")
 
     def _iso_to_ms(self, value: str | None) -> int | None:
         if value is None:
