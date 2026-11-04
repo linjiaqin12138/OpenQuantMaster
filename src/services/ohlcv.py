@@ -8,7 +8,7 @@ import pandas as pd
 import structlog
 from pydantic import BaseModel, Field
 
-from runtime.services.base import BaseService, ServiceResult
+from src.services.base import BaseService, ServiceResult
 
 logger = structlog.get_logger()
 

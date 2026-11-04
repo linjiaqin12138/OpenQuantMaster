@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from runtime.services.binance_perp import BinancePerp, BinancePerpConfig
+from src.services.binance_perp import BinancePerp, BinancePerpConfig
 
 
 class FakeExchange:

@@ -10,8 +10,8 @@ import talib
 import talib.abstract as ta
 from pydantic import BaseModel, Field, model_validator
 
-from runtime.services.base import BaseService, ServiceResult
-from runtime.services.ohlcv import OHLCV
+from src.services.base import BaseService, ServiceResult
+from src.services.ohlcv import OHLCV
 
 logger = structlog.get_logger()
 

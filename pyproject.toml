@@ -40,8 +40,8 @@ Repository = "https://github.com/linjiaqin12138/OpenQuantMaster.git"
 Issues = "https://github.com/linjiaqin12138/OpenQuantMaster.git/issues"
 
 [project.scripts]
-quantmaster-daemon = "runtime.daemon:main"
-quantmaster-run = "runtime.cli:run_pipeline"
+quantmaster-daemon = "src.daemon:main"
+quantmaster-run = "src.cli:run_pipeline"
 
 [project.optional-dependencies]
 dev = [
@@ -55,7 +55,7 @@ package-dir = {"" = "."}
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["runtime*", "tools*", "skills*", "schemas*", "pipelines*"]
+include = ["src*", "tools*", "skills*", "schemas*", "pipelines*"]
 
 [tool.setuptools.package-data]
 "skills" = ["**/*.md"]
@@ -74,7 +74,7 @@ markers = [
 [tool.ruff]
 target-version = "py312"
 line-length = 120
-src = ["runtime", "tools", "tests"]
+src = ["src", "tools", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]

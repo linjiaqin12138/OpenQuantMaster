@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pandas as pd
 import pytest
 
-from runtime.services.ohlcv import OHLCV, OHLCVConfig, OHLCVCryptoConfig
+from src.services.ohlcv import OHLCV, OHLCVConfig, OHLCVCryptoConfig
 
 
 @pytest.mark.unit

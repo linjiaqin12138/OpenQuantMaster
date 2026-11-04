@@ -5,8 +5,8 @@ import pandas as pd
 import pytest
 import talib
 
-from runtime.services.indicator import Indicator
-from runtime.services.ohlcv import OHLCV, OHLCVConfig, OHLCVCryptoConfig
+from src.services.indicator import Indicator
+from src.services.ohlcv import OHLCV, OHLCVConfig, OHLCVCryptoConfig
 
 
 def _make_bars(n: int = 50) -> list[dict]:

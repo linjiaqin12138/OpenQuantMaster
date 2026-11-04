@@ -4,7 +4,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from runtime.services.base import BaseService, ServiceResult
+from src.services.base import BaseService, ServiceResult
 
 Action = Literal[
     "balance",
