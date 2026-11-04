@@ -1,51 +1,51 @@
 # indicator_tool
 
-基于 OHLCV 数据计算任意 TA-Lib 技术指标并识别蜡烛图形态，输出汇总结论与指标结果 artifact。
+Compute arbitrary TA-Lib technical indicators and candlestick patterns from OHLCV data. Returns a summary plus an indicator-result artifact.
 
-## 支持的指标
+## Supported indicators
 
-`indicators` 接受任意 TA-Lib 函数名（大小写不敏感）。工具通过 `talib.abstract.Function` 统一动态分发，不再为单个指标保留专用计算逻辑。
+`indicators` accepts any TA-Lib function name (case-insensitive). The tool dispatches via `talib.abstract.Function`; there is no per-indicator special-case math path.
 
-为兼容旧用法，以下 6 个友好别名仍被支持，并映射到对应 TA-Lib 函数：
+For backward compatibility, these six friendly aliases still map to TA-Lib functions:
 
-| 别名 | TA-Lib 函数 | 说明 |
-|------|-------------|------|
-| `sma` | `SMA` | 简单移动平均线 |
-| `ema` | `EMA` | 指数移动平均线 |
-| `macd` | `MACD` | 指数平滑异同移动平均线 |
-| `rsi` | `RSI` | 相对强弱指数 |
-| `boll` | `BBANDS` | 布林带 |
-| `atr` | `ATR` | 真实波动幅度均值 |
+| Alias | TA-Lib function | Description |
+|-------|-----------------|-------------|
+| `sma` | `SMA` | Simple moving average |
+| `ema` | `EMA` | Exponential moving average |
+| `macd` | `MACD` | Moving average convergence divergence |
+| `rsi` | `RSI` | Relative strength index |
+| `boll` | `BBANDS` | Bollinger bands |
+| `atr` | `ATR` | Average true range |
 
-未传 `indicators` 时，默认计算上述 6 个指标。传入不存在的函数名将返回 `ToolResult(success=False)`。
+When `indicators` is omitted, the six aliases above are computed. Unknown function names return `ToolResult(success=False)`.
 
-## 支持的蜡烛图形态
+## Supported candlestick patterns
 
-`patterns` 为 `list[str] | None`，默认 `None`（不计算形态）。传入列表时启用形态识别，支持 TA-Lib 全部 61 个 `CDL*` 函数。
+`patterns` is `list[str] | None`, default `None` (no pattern detection). When a list is provided, all 61 TA-Lib `CDL*` functions are available.
 
-- 可传裸名，自动补 `CDL` 前缀，如 `["ENGULFING", "DOJI"]` 等价于 `["CDLENGULFING", "CDLDOJI"]`。
-- 也可直接传完整名如 `"CDLENGULFING"`。
-- 形态方向默认按 TA-Lib 返回值符号判定：`>0` 为 `bullish`（看涨），`<0` 为 `bearish`（看跌）。
-- `DOJI`、`LONGLEGGEDDOJI`、`SPINNINGTOP`、`HIKKAKE` 等非零但语义中性的形态会被覆盖标记为 `neutral`。
+- Bare names are accepted and prefixed with `CDL`, e.g. `["ENGULFING", "DOJI"]` equals `["CDLENGULFING", "CDLDOJI"]`.
+- Full names such as `"CDLENGULFING"` are also accepted.
+- Direction follows the TA-Lib return sign by default: `>0` → `bullish`, `<0` → `bearish`.
+- Patterns that are non-zero but semantically neutral (`DOJI`, `LONGLEGGEDDOJI`, `SPINNINGTOP`, `HIKKAKE`, …) are labeled `neutral`.
 
-## 输入参数
+## Inputs
 
-| 参数名 | 类型 | 必填 | 默认值 | 说明 |
-|--------|------|------|--------|------|
-| source | string | 否 | `"symbol"` | 数据来源，可选 `"symbol"` 或 `"ohlcv_artifact"` |
-| symbol | string | 条件必填 | `null` | 交易标的代码，`source="symbol"` 时必填 |
-| market | string | 否 | `"crypto"` | 市场类型，可选 `"crypto"、`"us_equity"`、`"hk_equity"`、`"a_share"` |
-| interval | string | 否 | `"1h"` | K 线周期 |
-| limit | integer | 否 | `100` | 请求的 K 线数量，必须 ≥ 1 |
-| indicators | list[string] | 否 | `["sma", "ema", "macd", "rsi", "boll", "atr"]` | 要计算的指标函数名列表 |
-| indicator_params | dict[str, dict] | 否 | `{}` | 按函数名（或别名）索引，覆盖 TA-Lib 默认参数，如 `{"SMA": {"timeperiod": 20}}` |
-| patterns | list[string] | 否 | `None` | 要识别的蜡烛图形态裸名/全名列表，`None` 或空列表表示不计算 |
-| artifact | string | 条件必填 | `null` | OHLCV artifact 相对路径或绝对路径，`source="ohlcv_artifact"` 时必填 |
-| pipeline_run_id | string | 否 | `null` | Pipeline 运行 ID，用于组织输出 artifact 目录 |
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| source | string | no | `"symbol"` | Data source: `"symbol"` or `"ohlcv_artifact"` |
+| symbol | string | conditional | `null` | Instrument code; required when `source="symbol"` |
+| market | string | no | `"crypto"` | `"crypto"`, `"us_equity"`, `"hk_equity"`, or `"a_share"` |
+| interval | string | no | `"1h"` | Candle interval |
+| limit | integer | no | `100` | Number of candles requested; must be ≥ 1 |
+| indicators | list[string] | no | `["sma", "ema", "macd", "rsi", "boll", "atr"]` | Indicator function names / aliases |
+| indicator_params | dict[str, dict] | no | `{}` | Per-function (or alias) overrides of TA-Lib defaults, e.g. `{"SMA": {"timeperiod": 20}}` |
+| patterns | list[string] | no | `None` | Pattern bare/full names; `None` or empty skips pattern detection |
+| artifact | string | conditional | `null` | OHLCV artifact path (relative or absolute); required when `source="ohlcv_artifact"` |
+| pipeline_run_id | string | no | `null` | Pipeline run id used to place output artifacts |
 
-## 输出结构
+## Output shape
 
-成功时 `ToolResult.data` 包含以下字段：
+On success, `ToolResult.data` looks like:
 
 ```json
 {
@@ -99,44 +99,44 @@
 }
 ```
 
-说明：
+Notes:
 
-- 单输出指标输出 `{"value": ..., "params": {...}}`。
-- 多输出指标按 `output_names` 展开（如 `MACD` 输出 `macd`、`macdsignal`、`macdhist`），并附加 `params`。
-- 运行时失败的指标（如缺少必需输入的 `MAVP`）记录 `{"error": "..."}`，但整体 `success=true`。
-- `patterns` 为 `{}` 时表示未启用形态识别。
+- Single-output indicators use `{"value": ..., "params": {...}}`.
+- Multi-output indicators expand `output_names` (e.g. `MACD` → `macd`, `macdsignal`, `macdhist`) and attach `params`.
+- Indicators that fail at runtime (e.g. `MAVP` missing required inputs) record `{"error": "..."}` while overall `success` stays `true`.
+- `patterns` is `{}` when pattern detection was not enabled.
 
-输出 artifact 为 JSON 文件，存储于 `artifacts/<run_id>/indicator_tool/indicator_result.json`，包含与 `data` 中一致的完整内容。
+The output artifact is JSON at `artifacts/<run_id>/indicator_tool/indicator_result.json`, matching the full `data` payload.
 
-## CLI 使用示例
+## CLI examples
 
-### 1. 直接通过 symbol 计算默认指标
+### 1. Default indicators from a symbol
 
 ```bash
 python -m runtime.cli tool indicator_tool --inputs '{"symbol": "SUIUSDT", "market": "crypto", "interval": "1h", "limit": 100}'
 ```
 
-### 2. 指定任意 TA-Lib 指标并覆盖参数
+### 2. Arbitrary TA-Lib indicators with param overrides
 
 ```bash
 python -m runtime.cli tool indicator_tool --inputs '{"symbol": "SUIUSDT", "market": "crypto", "interval": "1h", "indicators": ["ADX", "OBV", "STOCH"], "indicator_params": {"STOCH": {"fastk_period": 14, "slowk_period": 3, "slowd_period": 3}}}'
 ```
 
-### 3. 指定形态识别
+### 3. Pattern detection
 
 ```bash
 python -m runtime.cli tool indicator_tool --inputs '{"symbol": "SUIUSDT", "market": "crypto", "interval": "1h", "indicators": ["rsi", "macd"], "patterns": ["ENGULFING", "DOJI"]}'
 ```
 
-### 4. 从 artifact 读取（pipeline 场景）
+### 4. Read from an artifact (pipeline)
 
 ```bash
 python -m runtime.cli tool indicator_tool --inputs '{"source": "ohlcv_artifact", "artifact": "run-xxx/ohlcv_tool/ohlcv_SUIUSDT_1h.csv", "indicators": ["sma", "ema", "boll"], "patterns": ["HAMMER", "ENGULFING"]}'
 ```
 
-> 注意：`artifact` 路径可以是相对于 `artifacts/` 目录的相对路径，也可以是绝对路径。
+> Note: `artifact` may be relative to `artifacts/` or absolute.
 
-## Pipeline YAML 使用示例
+## Pipeline YAML example
 
 ```yaml
 name: indicator_demo
@@ -175,18 +175,18 @@ stages:
           - DOJI
 ```
 
-## 依赖说明
+## Dependencies
 
-`indicator_tool` 依赖 Python 包 `ta-lib`（通过 `import talib` 调用）。
+`indicator_tool` depends on the Python `ta-lib` package (`import talib`).
 
-- `ta-lib` 需要 TA-Lib C 库支持。在 Linux/macOS 上通常需要先安装系统库（如 `ta-lib`），再 `pip install TA-Lib`。
-- 部分平台提供预编译 wheel（例如 `ta-lib-bin`、`TA-Lib-Precompiled` 等），可直接 `pip install`。
-- 如果 `ta-lib` 安装失败，指标计算功能将无法使用。
+- The C TA-Lib library must be installed first on Linux/macOS, then `pip install TA-Lib`.
+- Some platforms ship wheels (`ta-lib-bin`, `TA-Lib-Precompiled`, etc.).
+- If `ta-lib` is unavailable, indicator computation cannot run.
 
-## 注意事项
+## Notes
 
-1. **数据量要求**：工具要求至少 2 行 OHLCV 数据，且实际行数必须满足所选指标/形态的最大 `talib.abstract.Function.lookback`。不同函数所需行数不同，传入 `limit=200` 通常可覆盖绝大多数指标。
-2. **小数精度**：指标值以 `float` 输出，可能因浮点运算产生微小精度差异。
-3. **形态识别说明**：形态基于 TA-Lib 的整数编码结果判断，`strength` 为 TA-Lib 返回值的绝对值；方向按符号判定，中性形态见上文覆盖表。
-4. **symbol 推断**：从 artifact 读取时，工具会尝试根据文件名推断 `symbol`（例如 `ohlcv_BTC-USDT.csv` 推断为 `BTC-USDT`）。
-5. **默认值**：未传 `indicators` 时默认计算 6 个指标；未传 `patterns` 时默认不启用形态识别。
+1. **Data length**: at least 2 OHLCV rows are required, and the series must satisfy the max `talib.abstract.Function.lookback` of the selected indicators/patterns. `limit=200` covers most functions.
+2. **Float precision**: indicator values are floats and may show tiny floating-point differences.
+3. **Patterns**: direction uses the TA-Lib integer sign; `strength` is the absolute value; neutral overrides are listed above.
+4. **Symbol inference**: when reading an artifact, the tool may infer `symbol` from the filename (e.g. `ohlcv_BTC-USDT.csv` → `BTC-USDT`).
+5. **Defaults**: omitting `indicators` computes the six aliases; omitting `patterns` skips pattern detection.

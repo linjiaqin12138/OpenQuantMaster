@@ -205,13 +205,13 @@ Output is a CSV artifact stored under `./artifacts/<run_id>/fetch_sol/ohlcv_SOLU
 
 ### `binance_perp_tool`
 
-Binance USDT-M perpetual trading via CCXT (`binanceusdm`). Credentials come from `exchanges.binance` (referenced by `execution.binance_perp`). Write actions default to `dry_run: true`.
+Binance USDT-M perpetual trading via CCXT (`binanceusdm`). Credentials come from `exchanges.binance` (referenced by `execution.binance_perp`). Write actions default to `dry_run: true`. Full reference: [`docs/tools/binance_perp_tool.md`](docs/tools/binance_perp_tool.md).
 
 **Actions**
 
 | action | Notes |
 |--------|--------|
-| `balance` / `positions` / `open_orders` | Read; `symbol` optional for positions/orders |
+| `balance` / `positions` / `open_orders` | Read; `open_orders` includes conditional TP/SL by default (`order_kind`) |
 | `create_order` | `market`, `limit`, `stop_market`, `take_profit_market`, `stop`, `take_profit`, `trailing_stop_market` |
 | `cancel_order` | Requires `order_id` + `symbol` |
 | `set_leverage` / `set_margin_mode` | Per symbol |

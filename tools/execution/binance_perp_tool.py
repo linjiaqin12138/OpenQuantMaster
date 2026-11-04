@@ -67,6 +67,7 @@ class BinancePerpInput(BaseModel):
     position_side: Literal["BOTH", "LONG", "SHORT"] | None = None
     working_type: Literal["CONTRACT_PRICE", "MARK_PRICE"] | None = None
     hedge: bool | None = None
+    include_conditional: bool = True
 
     @model_validator(mode="after")
     def validate_action_params(self) -> BinancePerpInput:
@@ -127,7 +128,7 @@ class BinancePerpOutput(BaseModel):
 
 class BinancePerpTool(BaseTool):
     name: ClassVar[str] = "binance_perp_tool"
-    version: ClassVar[str] = "0.1.0"
+    version: ClassVar[str] = "0.2.0"
     capability: ClassVar[str] = "execution"
     cost_estimate_usd: ClassVar[float] = 0.0
     fallback_tools: ClassVar[list[str]] = []
@@ -180,6 +181,7 @@ class BinancePerpTool(BaseTool):
             "position_side",
             "working_type",
             "hedge",
+            "include_conditional",
         ):
             value = getattr(parsed, field)
             if value is not None:
@@ -208,8 +210,7 @@ class BinancePerpTool(BaseTool):
                 )
                 return [self._trim_position(p) for p in raw]
             if action == "open_orders":
-                raw = await exchange.fetch_open_orders(parsed.symbol)
-                return [self._trim_order(o) for o in raw]
+                return await self._fetch_open_orders(exchange, parsed)
             if action == "create_order":
                 return self._trim_order(await self._create_order(exchange, parsed))
             if action == "cancel_order":
@@ -228,6 +229,27 @@ class BinancePerpTool(BaseTool):
             raise ValueError(f"Unsupported action: {action}")
         finally:
             await exchange.close()
+
+    async def _fetch_open_orders(
+        self, exchange: Any, parsed: BinancePerpInput
+    ) -> list[dict[str, Any]]:
+        """Fetch resting orders and optionally Binance algo/conditional orders.
+
+        USDM stop/TP live on the algo endpoint; CCXT exposes them via
+        ``fetch_open_orders(..., params={"stop": True})``.
+        """
+        resting = await exchange.fetch_open_orders(parsed.symbol)
+        trimmed = [self._trim_order(o, order_kind="resting") for o in resting]
+        if not parsed.include_conditional:
+            return trimmed
+
+        conditional = await exchange.fetch_open_orders(
+            parsed.symbol, params={"stop": True}
+        )
+        trimmed.extend(
+            self._trim_order(o, order_kind="conditional") for o in conditional
+        )
+        return trimmed
 
     async def _create_order(self, exchange: Any, parsed: BinancePerpInput) -> dict[str, Any]:
         assert parsed.symbol and parsed.side and parsed.order_type
@@ -300,12 +322,24 @@ class BinancePerpTool(BaseTool):
             "percentage": raw.get("percentage"),
         }
 
-    def _trim_order(self, raw: dict[str, Any]) -> dict[str, Any]:
+    def _trim_order(
+        self,
+        raw: dict[str, Any],
+        *,
+        order_kind: Literal["resting", "conditional"] | None = None,
+    ) -> dict[str, Any]:
+        info = raw.get("info") if isinstance(raw.get("info"), dict) else {}
+        kind = order_kind or self._infer_order_kind(raw, info)
+        order_type = self._resolve_order_type(raw, info, kind)
+        close_position = info.get("closePosition")
+        if close_position is None:
+            close_position = raw.get("closePosition")
         return {
             "id": raw.get("id"),
             "clientOrderId": raw.get("clientOrderId"),
             "symbol": raw.get("symbol"),
-            "type": raw.get("type"),
+            "order_kind": kind,
+            "type": order_type,
             "side": raw.get("side"),
             "price": raw.get("price"),
             "amount": raw.get("amount"),
@@ -313,6 +347,31 @@ class BinancePerpTool(BaseTool):
             "remaining": raw.get("remaining"),
             "status": raw.get("status"),
             "reduceOnly": raw.get("reduceOnly"),
-            "stopPrice": raw.get("stopPrice"),
+            "stopPrice": raw.get("stopPrice") if raw.get("stopPrice") is not None else raw.get("triggerPrice"),
+            "workingType": info.get("workingType"),
+            "algoStatus": info.get("algoStatus"),
+            "closePosition": close_position,
             "timestamp": raw.get("timestamp"),
         }
+
+    @staticmethod
+    def _infer_order_kind(raw: dict[str, Any], info: dict[str, Any]) -> str:
+        algo_type = info.get("algoType")
+        if isinstance(algo_type, str) and algo_type.upper() == "CONDITIONAL":
+            return "conditional"
+        if info.get("algoId") is not None:
+            return "conditional"
+        return "resting"
+
+    @staticmethod
+    def _resolve_order_type(
+        raw: dict[str, Any],
+        info: dict[str, Any],
+        order_kind: str,
+    ) -> Any:
+        # CCXT normalizes conditional stops to type="market"; prefer venue orderType.
+        if order_kind == "conditional":
+            venue_type = info.get("orderType")
+            if isinstance(venue_type, str) and venue_type:
+                return venue_type.lower()
+        return raw.get("type")
