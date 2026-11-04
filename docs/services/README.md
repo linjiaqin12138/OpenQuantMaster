@@ -12,5 +12,5 @@ Call pattern:
 
 ```python
 result = await Service(cfg).run({...})  # dict → validated input model
-# result.success / result.data / result.error
+# result.success / result.data / result.error  # ServiceError(code, message, exception: Exception | None)
 ```

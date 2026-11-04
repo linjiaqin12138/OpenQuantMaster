@@ -49,7 +49,8 @@ async def test_ohlcv_rejects_invalid_market():
         {"symbol": "BTCUSDT", "market": "forex", "interval": "1h"}
     )
     assert result.success is False
-    assert "market" in (result.error or "").lower()
+    assert result.error is not None
+    assert "market" in result.error.message.lower()
 
 
 @pytest.mark.unit

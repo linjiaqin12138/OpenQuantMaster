@@ -86,7 +86,10 @@ class Indicator(BaseService):
         valid_funcs = set(talib.get_functions())
         for name, func_name in zip(indicator_names, indicator_func_names):
             if func_name not in valid_funcs:
-                return ServiceResult(success=False, error=f"Unknown indicator function: {name}")
+                return ServiceResult.from_error(
+                    "unknown_indicator",
+                    f"Unknown indicator function: {name}",
+                )
 
         interval = inputs.interval
         if inputs.bars is not None:
@@ -103,7 +106,10 @@ class Indicator(BaseService):
 
         rows = len(df)
         if rows < 2:
-            return ServiceResult(success=False, error="OHLCV data requires at least 2 rows")
+            return ServiceResult.from_error(
+                "insufficient_data",
+                "OHLCV data requires at least 2 rows",
+            )
 
         indicator_params = {
             _resolve_indicator_name(k): v for k, v in inputs.indicator_params.items()
@@ -114,9 +120,9 @@ class Indicator(BaseService):
             indicator_func_names, patterns, indicator_params, df
         )
         if rows < required_min_period:
-            return ServiceResult(
-                success=False,
-                error=(
+            return ServiceResult.from_error(
+                "insufficient_data",
+                (
                     f"Insufficient data: {rows} rows provided, "
                     f"but at least {required_min_period} rows are required "
                     f"for the configured indicators/patterns"
@@ -157,7 +163,8 @@ class Indicator(BaseService):
             }
         )
         if not result.success:
-            raise RuntimeError(f"Failed to fetch OHLCV data: {result.error or 'unknown error'}")
+            detail = result.error.message if result.error else "unknown error"
+            raise RuntimeError(f"Failed to fetch OHLCV data: {detail}")
         bars = result.data.get("bars") or []
         if not bars:
             raise RuntimeError("Failed to fetch OHLCV data: empty bars")

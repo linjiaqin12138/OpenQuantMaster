@@ -72,7 +72,10 @@ class OHLCV(BaseService):
         elif market == "a_share":
             df = await self._fetch_a_share(inputs)
         else:
-            return ServiceResult(success=False, error=f"Unsupported market: {market}")
+            return ServiceResult.from_error(
+                "unsupported_market",
+                f"Unsupported market: {market}",
+            )
 
         bars = self._dataframe_to_bars(df)
         output = self.output_model(

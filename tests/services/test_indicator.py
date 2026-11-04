@@ -125,8 +125,10 @@ async def test_indicator_rejects_insufficient_data():
         }
     )
     assert result.success is False
-    assert "Insufficient data" in (result.error or "")
-    assert "33" in (result.error or "")
+    assert result.error is not None
+    assert result.error.code == "insufficient_data"
+    assert "Insufficient data" in result.error.message
+    assert "33" in result.error.message
 
 
 @pytest.mark.unit
@@ -134,7 +136,8 @@ async def test_indicator_rejects_insufficient_data():
 async def test_indicator_rejects_missing_bars_without_ohlcv():
     result = await Indicator().run({"indicators": ["rsi"]})
     assert result.success is False
-    assert "bars" in (result.error or "").lower()
+    assert result.error is not None
+    assert "bars" in result.error.message.lower()
 
 
 @pytest.mark.unit
@@ -144,7 +147,8 @@ async def test_indicator_rejects_symbol_without_ohlcv():
         {"symbol": "BTCUSDT", "market": "crypto", "indicators": ["rsi"]}
     )
     assert result.success is False
-    assert "bars" in (result.error or "").lower()
+    assert result.error is not None
+    assert "bars" in result.error.message.lower()
 
 
 @pytest.mark.unit
@@ -248,7 +252,9 @@ async def test_indicator_rejects_unknown_indicator():
         }
     )
     assert result.success is False
-    assert "Unknown indicator function" in (result.error or "")
+    assert result.error is not None
+    assert result.error.code == "unknown_indicator"
+    assert "Unknown indicator function" in result.error.message
 
 
 @pytest.mark.unit

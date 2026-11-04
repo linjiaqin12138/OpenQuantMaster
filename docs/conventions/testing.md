@@ -2,79 +2,70 @@
 
 ## Goals
 
-Tests should survive internal refactors. Prefer stable **public surfaces** — **CLI** (protocol), **Service** (programmable API with documented Pydantic I/O), tool `--inputs` contract during transition, and external SDK APIs — over private helpers.
+Tests should survive internal refactors. Prefer stable **public surfaces** — **Service** APIs (`BaseService.run` with documented Pydantic config / input / output) and external SDK APIs — over private helpers.
 
 ## Prefer entrypoints
 
-- Drive **orchestration** behavior through a **Service** or the **CLI entry**, not by importing and calling internal helpers.
-- **Operation** unit tests may call a single atomic Operation directly when asserting pure logic or one I/O boundary; do not use that shortcut for multi-step workflows (those belong under Service or CLI tests).
-- For tools, the stable entry is:
-
-  ```bash
-  python -m runtime.cli tool <tool_name> --inputs '<json>' [--config path]
-  ```
-
-  In tests, invoke the Click CLI (e.g. `click.testing.CliRunner`) against `runtime.cli.cli`, not `SomeTool()._private_method(...)`.
-- Assert on CLI exit code and stdout/stderr JSON (or documented output shape). Do not assert on private return types unless they are part of a published contract.
+- Drive behavior through a **Service**: construct with its config (or dependencies), then `await service.run({...})`.
+- **Operation** unit tests may call a single atomic Operation directly when asserting pure logic or one I/O boundary; do not use that shortcut for multi-step workflows (those belong under Service tests).
+- Assert on `ServiceResult` (`success`, `data`, `error` as `ServiceError | None` with `code` / `message` / `exception`) and documented output fields. Do not assert on private helpers or internal return types unless they are part of a published contract.
 - Internal modules may be rewritten freely; **entry parameters and output contracts should stay stable**.
 
 ## Patching
 
-- **Default: do not patch.** Prefer real code paths with fixtures / temp dirs / seeded data.
-- **Only patch SDKs (or network / process boundaries) that have external side effects** — e.g. `ccxt`, HTTP clients, brokers. SDK surfaces are relatively stable compared to our internals.
-- **Do not monkeypatch our own internal functions** (`runtime.*`, `tools.*.*_helper`, private methods). If a test needs that, the design or the test is wrong — go through the entrypoint instead.
-- Pure computation (validators, formatters, pure transforms) needs **no patch**; call via the entrypoint or a public function and assert outputs.
-- **Do not patch the database / ORM / repository layer.** Seed real rows (or use a temp SQLite file) so transaction boundaries, session lifecycle, and commit/rollback bugs can still surface.
+- **Default: do not patch.** Prefer real service code paths with fixture inputs.
+- **Only patch SDKs (or network / process boundaries) that have external side effects** — e.g. `ccxt`, `yfinance`, `akshare`, HTTP clients. SDK surfaces are relatively stable compared to our internals.
+- **Do not monkeypatch our own modules** (`src.services.*`, private methods). If a test needs that, the design or the test is wrong — go through `Service.run` instead (or inject a real dependency service that itself only patches SDKs).
+- Pure computation (validators, formatters, pure transforms) needs **no patch**; call via the service entrypoint or a public function and assert outputs.
 
 ## What to patch vs not
 
 | Layer | Patch? | Instead |
 |-------|--------|---------|
-| CLI / Service public I/O | No | Invoke CLI or Service with fixture inputs |
-| Tool public `--inputs` (transitional) | No | Invoke CLI `tool` subcommand |
+| Service public `run` I/O | No | `await Service(cfg).run({...})` with fixture inputs |
 | Atomic Operation (unit) | No | Call Operation directly; assert return value |
-| Internal helpers / resolvers | No | Reach them via Service, CLI, or entry + config |
+| Internal helpers | No | Reach them via Service entry + config |
 | External SDK (`ccxt`, etc.) | Yes, when the test would otherwise hit the network | Fake SDK module / exchange class |
 | Pure logic | No | Assert outputs |
-| DB / StateStore | No | Temp DB + seed data |
 
 ## Markers
 
 - `@pytest.mark.unit` — fast, no real network; SDK may be faked.
-- `@pytest.mark.integration` — broader wiring (bootstrap, pipelines, real temp DB); still avoid live exchange calls unless explicitly intended.
+- `@pytest.mark.integration` — broader wiring when present; still avoid live exchange calls unless explicitly intended.
 
-## Example shape (tools + side-effect SDK)
+## Example shape (service + side-effect SDK)
 
 ```python
-from click.testing import CliRunner
 from unittest.mock import AsyncMock, patch
 
-from runtime.cli import cli
+import pytest
 
-def test_binance_perp_balance_via_cli(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "config.yaml").write_text("...")  # real config file
+from src.services.binance_perp import BinancePerp, BinancePerpConfig
 
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_binance_perp_balance():
     class FakeExchange:
         def __init__(self, *a, **k):
-            self.fetch_balance = AsyncMock(return_value={...})
+            self.fetch_balance = AsyncMock(
+                return_value={"free": {"USDT": 1000.0}, "used": {"USDT": 0.0}, "total": {"USDT": 1000.0}, "info": {}}
+            )
             self.close = AsyncMock()
             self.set_sandbox_mode = AsyncMock()
 
     fake_ccxt = type("ccxt", (), {"binanceusdm": FakeExchange})()
+    svc = BinancePerp(BinancePerpConfig(exchange="binance", product="usdm", sandbox=True))
 
     with patch.dict("sys.modules", {"ccxt.async_support": fake_ccxt}):
-        result = CliRunner().invoke(
-            cli,
-            ["tool", "binance_perp_tool", "--inputs", '{"action":"balance"}'],
-        )
+        result = await svc.run({"action": "balance"})
 
-    assert result.exit_code == 0
-    # parse stdout JSON ToolResult and assert contract fields
+    assert result.success is True
+    assert result.data["result"]["assets"]["USDT"]["total"] == 1000.0
 ```
 
 Notes:
 
-- Config is a real file under `tmp_path` (no patching `load_config` internals).
+- Construct the service with a real `*Config` model (no patching of our config types).
 - Only `ccxt.async_support` is replaced — that is the side-effect SDK.
-- Discovery, validation, dry_run, trimming, etc. all run for real through the CLI path.
+- Validation, dry_run policy, response trimming, etc. all run for real through `Service.run`.

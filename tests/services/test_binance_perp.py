@@ -142,7 +142,8 @@ async def test_stop_market_requires_stop_price(ccxt_fake):
         }
     )
     assert result.success is False
-    assert "stop_price" in (result.error or "")
+    assert result.error is not None
+    assert "stop_price" in result.error.message
     assert ccxt_fake.instances == []
 
 
