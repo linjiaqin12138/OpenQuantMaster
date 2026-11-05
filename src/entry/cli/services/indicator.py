@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 from src.config import load_config
-from src.entry.cli.base import echo_service_result, output_option, register_cli
+from src.entry.cli.base import echo_service_result, output_option
 from src.services.indicator import Indicator
 from src.services.ohlcv import OHLCV, OHLCVConfig
 
@@ -35,7 +35,6 @@ def render_indicator(data: dict[str, Any]) -> None:
         )
 
 
-@register_cli(renderer=render_indicator)
 @click.command(
     epilog="""
 \b

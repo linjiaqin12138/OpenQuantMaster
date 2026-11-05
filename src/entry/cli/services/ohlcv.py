@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from src.config import load_config
-from src.entry.cli.base import echo_service_result, output_option, register_cli
+from src.entry.cli.base import echo_service_result, output_option
 from src.services.ohlcv import OHLCV, OHLCVConfig
 
 
@@ -31,7 +31,6 @@ def render_ohlcv(data: dict[str, Any]) -> None:
     console.print(table)
 
 
-@register_cli(renderer=render_ohlcv)
 @click.command(
     epilog="""
 \b

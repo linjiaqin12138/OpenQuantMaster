@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 from src.config import load_config
-from src.entry.cli.base import echo_service_result, output_option, register_cli
+from src.entry.cli.base import echo_service_result, output_option
 from src.services.binance_perp import BinancePerp, BinancePerpConfig
 
 
@@ -48,7 +48,6 @@ def render_binance_perp(data: dict[str, Any]) -> None:
         console.print(table)
 
 
-@register_cli(renderer=render_binance_perp)
 @click.command(
     "binance-perp",
     epilog="""

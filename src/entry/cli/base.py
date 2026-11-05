@@ -79,14 +79,10 @@ output_option = click.option(
 )
 
 
-def register_cli(*, renderer: RichRenderer | None = None) -> Callable[[click.Command], click.Command]:
-    def register(command: click.Command) -> click.Command:
-        run.add_command(command)
-        if renderer is not None:
-            _rich_renderers[command.name] = renderer
-        return command
-
-    return register
+def register_service(command: click.Command, *, renderer: RichRenderer | None = None) -> None:
+    run.add_command(command)
+    if renderer is not None:
+        _rich_renderers[command.name] = renderer
 
 
 def echo_service_result(result: ServiceResult, service_name: str, output: str) -> None:
