@@ -35,6 +35,18 @@ pip install -e ".[dev]"
 
 Optional: copy `config.yaml.example` / `.env.example` when you wire live exchange credentials later. Unit tests do not need them (SDKs are faked).
 
+## CLI
+
+After the editable install, use `qm-cli` to inspect and run services:
+
+```bash
+qm-cli help
+qm-cli list
+qm-cli run ohlcv --symbol BTCUSDT --market crypto --interval 1h --limit 10
+```
+
+Use `qm-cli run ohlcv --help` for all OHLCV options. Commands print the service result as JSON, including `success`, `data`, `error`, and `duration_seconds`. Invalid arguments or failed service calls return a non-zero exit code. Live OHLCV calls access external market-data providers.
+
 ## Run tests
 
 From the repo root with the venv activated:

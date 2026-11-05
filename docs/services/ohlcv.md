@@ -54,3 +54,4 @@ result = await svc.run(
 assert result.success
 bars = result.data["bars"]
 ```
+

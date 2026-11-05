@@ -40,8 +40,7 @@ Repository = "https://github.com/linjiaqin12138/OpenQuantMaster.git"
 Issues = "https://github.com/linjiaqin12138/OpenQuantMaster.git/issues"
 
 [project.scripts]
-quantmaster-daemon = "src.daemon:main"
-quantmaster-run = "src.cli:run_pipeline"
+qm-cli = "src.entry.cli:main"
 
 [project.optional-dependencies]
 dev = [
