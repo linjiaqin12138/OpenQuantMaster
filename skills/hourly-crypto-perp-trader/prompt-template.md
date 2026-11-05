@@ -21,8 +21,8 @@ news_limit: 50
 # 每个标的/策略使用独立状态文件；更换 symbol 时也应更换路径。
 state_file: .agent-state/hourly-crypto-perp-trader/BTCUSDT.json
 
-# agent 最多使用的资金，不是账户真实余额。
-# 例如真实余额为 100 USDT、这里设为 20，则 agent 只能按 20 USDT 管理。
+# 给 agent 的初始本金/基准资金，不是账户真实余额，也不是固定上限。
+# 有效额度 = max(0, 初始本金 + 累计已实现盈亏)。盈利可继续交易，亏损后只能使用剩余额度。
 allocated_balance_usdt: 20
 
 # false：只 dry-run；true：明确授权实盘，写操作直接使用 --live，不先 dry-run。
@@ -36,6 +36,7 @@ autonomous: true
 
 instructions: |-
   无额外指示时，根据行情、技术指标、全部 K 线形态、新闻、当前仓位和挂单自主判断。
+  在状态文件中持续记录累计已实现盈亏，并据此更新有效额度；不要把未实现盈亏计入可用资金。
   默认不要查询 balance；仅在状态文件缺失/不清楚，或余额不足等异常需要同步时查询。
   仓位/订单调整或报错时通知用户。遵守 Skill 的其他风控和状态文件要求。
 ```
