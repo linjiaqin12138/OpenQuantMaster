@@ -2,7 +2,15 @@ name: CI
 
 on:
   push:
+    paths:
+      - "**.py"
+      - pyproject.toml
+      - .github/workflows/ci.yml
   pull_request:
+    paths:
+      - "**.py"
+      - pyproject.toml
+      - .github/workflows/ci.yml
 
 jobs:
   test:
