@@ -27,3 +27,6 @@ config.yaml
 .worktrees/
 .superpowers/
 uv.lock
+
+# Build artifacts
+dist/
