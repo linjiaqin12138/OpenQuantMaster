@@ -1,0 +1,30 @@
+{
+  "name": "OpenQuantMaster",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "workspaceFolder": "/workspaces/OpenQuantMaster",
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/workspaces/OpenQuantMaster,type=bind,consistency=cached"
+  ],
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": true,
+  "postCreateCommand": "/opt/venv/bin/pip install -e \".[dev]\"",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.unittestEnabled": false,
+        "python.testing.pytestArgs": [
+          "tests"
+        ]
+      }
+    }
+  }
+}
