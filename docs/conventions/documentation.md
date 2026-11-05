@@ -24,6 +24,8 @@ Each non-trivial service should have `docs/services/<service>.md` covering:
 4. Code call examples
 5. Operational caveats (dry-run, sandbox, symbol formats, etc.)
 
+Service docs describe only the service contract: parameters, outputs, code call examples, and operational caveats. Do not include CLI commands or CLI usage sections; CLI usage belongs in the CLI command's own `--help` text.
+
 Keep README summaries short and link to the full service doc for detail. Index services in [`docs/services/README.md`](../services/README.md).
 
 ## Cross-links

@@ -6,6 +6,7 @@ Application services live under `src/services/`. Each service has explicit Pydan
 |---------|--------|-----|
 | `OHLCV` | `src.services.ohlcv` | [ohlcv.md](./ohlcv.md) |
 | `Indicator` | `src.services.indicator` | [indicator.md](./indicator.md) |
+| `NewsFetcher` | `src.services.news_fetcher` | [news_fetcher.md](./news_fetcher.md) |
 | `BinancePerp` | `src.services.binance_perp` | [binance_perp.md](./binance_perp.md) |
 | `NotificationService` | `src.services.notification` | [notification.md](./notification.md) |
 
