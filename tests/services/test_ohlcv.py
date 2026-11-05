@@ -18,7 +18,7 @@ async def test_ohlcv_fetches_crypto_ccxt():
                 ]
             )
             self.close = AsyncMock()
-            self.set_sandbox_mode = AsyncMock()
+            self.set_sandbox_mode = MagicMock()
 
     fake_ccxt_module = type("ccxt", (), {"binance": FakeExchange})()
     cfg = OHLCVConfig(

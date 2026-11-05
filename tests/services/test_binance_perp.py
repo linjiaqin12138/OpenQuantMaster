@@ -1,7 +1,8 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.config import AppConfig
 from src.services.binance_perp import BinancePerp, BinancePerpConfig
 
 
@@ -42,7 +43,7 @@ class FakeExchange:
         self.set_margin_mode = AsyncMock(return_value={"marginMode": "isolated"})
         self.set_position_mode = AsyncMock(return_value={"dualSidePosition": True})
         self.close = AsyncMock()
-        self.set_sandbox_mode = AsyncMock()
+        self.set_sandbox_mode = MagicMock()
 
     async def _fetch_open_orders(self, symbol=None, since=None, limit=None, params=None):
         params = params or {}
@@ -59,6 +60,19 @@ def ccxt_fake():
     fake_ccxt = type("ccxt", (), {"binanceusdm": FakeExchange})()
     with patch.dict("sys.modules", {"ccxt.async_support": fake_ccxt}):
         yield FakeExchange
+
+
+def test_binance_perp_config_from_app_config():
+    app_config = AppConfig.model_validate(
+        {"providers": {"binance": {"apiKey": "key", "secret": "secret"}}}
+    )
+
+    config = BinancePerpConfig.from_config(app_config)
+
+    assert config.api_key == "key"
+    assert config.secret == "secret"
+    assert config.product == "usdm"
+    assert config.sandbox is False
 
 
 def _service() -> BinancePerp:
@@ -125,7 +139,7 @@ async def test_create_order_live_calls_sdk(ccxt_fake):
     assert len(ccxt_fake.instances) == 1
     exchange = ccxt_fake.instances[0]
     exchange.create_order.assert_awaited_once()
-    exchange.set_sandbox_mode.assert_awaited_once_with(True)
+    exchange.set_sandbox_mode.assert_called_once_with(True)
     exchange.close.assert_awaited_once()
 
 

@@ -10,10 +10,10 @@ Injected at construction: `BinancePerp(cfg)`.
 |-------|------|---------|-------------|
 | `exchange` | str | `binance` | Logical exchange |
 | `product` | `spot` \| `usdm` | `usdm` | Product (perp uses `usdm`) |
-| `sandbox` | bool | `true` | Sandbox / testnet when supported |
+| `sandbox` | bool | `false` | Legacy sandbox mode; Binance USD-M testnet is no longer supported by CCXT |
 | `api_key` / `secret` | str | `""` | Credentials |
 
-Exchange adapter details stay inside the service.
+Exchange adapter details stay inside the service. Use `BinancePerpConfig.from_config(AppConfig)` to extract Binance credentials from the global provider configuration.
 
 ## Actions
 

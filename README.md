@@ -43,6 +43,8 @@ After the editable install, use `qm-cli` to inspect and run services:
 qm-cli help
 qm-cli list
 qm-cli run ohlcv --symbol BTCUSDT --market crypto --interval 1h --limit 10
+qm-cli run indicator --symbol BTCUSDT --indicators sma,rsi,macd --patterns DOJI
+qm-cli run binance-perp balance
 ```
 
 Use `qm-cli run ohlcv --help` for all OHLCV options. The default `rich` output uses a service-specific renderer; services without one fall back to JSON. Successful JSON output contains only the service `data`, while failures contain only the error and exit non-zero. Live OHLCV calls access external market-data providers.

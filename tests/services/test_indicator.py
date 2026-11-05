@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pandas as pd
@@ -88,7 +88,7 @@ async def test_indicator_from_symbol_via_ohlcv():
         def __init__(self, *args, **kwargs) -> None:
             self.fetch_ohlcv = AsyncMock(return_value=_ccxt_ohlcv_rows(50))
             self.close = AsyncMock()
-            self.set_sandbox_mode = AsyncMock()
+            self.set_sandbox_mode = MagicMock()
 
     fake_ccxt_module = type("ccxt", (), {"binance": FakeExchange})()
     ohlcv = OHLCV(

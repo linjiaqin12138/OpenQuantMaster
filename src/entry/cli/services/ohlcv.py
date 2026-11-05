@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from src.config import load_config
-from src.entry.cli.base import echo_service_result, register_cli
+from src.entry.cli.base import echo_service_result, output_option, register_cli
 from src.services.ohlcv import OHLCV, OHLCVConfig
 
 
@@ -32,7 +32,18 @@ def render_ohlcv(data: dict[str, Any]) -> None:
 
 
 @register_cli(renderer=render_ohlcv)
-@click.command()
+@click.command(
+    epilog="""
+\b
+Examples:
+  qm-cli run ohlcv --symbol BTCUSDT --market crypto --interval 1h --limit 30
+  qm-cli run ohlcv --symbol AAPL --market us_equity --interval 1d --start 2026-01-01
+  qm-cli run ohlcv --symbol 000001.SZ --market a_share --interval 1d --source akshare
+  qm-cli run ohlcv --symbol BTCUSDT --market crypto --interval 1d -o 'jsonpath={.bars}'
+
+Dates use ISO-8601. JSON output contains only the service data and can be piped to a file.
+""",
+)
 @click.option("--symbol", required=True, help="Ticker, for example BTCUSDT or AAPL.")
 @click.option(
     "--market",
@@ -49,13 +60,7 @@ def render_ohlcv(data: dict[str, Any]) -> None:
     type=click.Choice(["ccxt", "yfinance", "tushare", "akshare"]),
     help="Force a market data provider.",
 )
-@click.option(
-    "--output",
-    "-o",
-    default="rich",
-    show_default=True,
-    help="Output format: rich, json, or jsonpath=<expression>.",
-)
+@output_option
 @click.pass_context
 def ohlcv(
     ctx: click.Context,
@@ -68,7 +73,13 @@ def ohlcv(
     source: str | None,
     output: str,
 ) -> None:
-    """Fetch OHLCV bars."""
+    """Fetch Open, High, Low, Close and Volume bars.
+
+    MARKET selects the default provider: crypto uses CCXT, US/HK equities use
+    yfinance, and A-shares use Tushare or AkShare. --source overrides that
+    selection. --start/--end optionally restrict the time range, while --limit
+    controls the requested row count (1-5000).
+    """
     try:
         config = load_config(ctx.obj["config_path"])
     except RuntimeError as exc:

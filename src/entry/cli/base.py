@@ -16,11 +16,36 @@ RichRenderer = Callable[[dict[str, Any]], None]
 _rich_renderers: dict[str, RichRenderer] = {}
 
 
-@click.group(invoke_without_command=True)
-@click.option("--config", "config_path", type=click.Path(path_type=Path), help="YAML config file path.")
+@click.group(
+    invoke_without_command=True,
+    epilog="""
+\b
+Examples:
+  qm-cli list
+  qm-cli run ohlcv --help
+  qm-cli run ohlcv --symbol BTCUSDT --market crypto --interval 1h --limit 30
+  qm-cli run indicator --symbol BTCUSDT --indicators sma,rsi,macd
+  qm-cli run binance-perp balance
+  qm-cli --config ~/.qm/config.yaml run ohlcv --symbol AAPL --market us_equity --interval 1d
+
+Use 'qm-cli run SERVICE --help' for service-specific arguments and output options.
+""",
+)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(path_type=Path),
+    help="YAML config file. Default lookup: ./config.yaml, then ~/.qm/config.yaml.",
+)
 @click.pass_context
 def main(ctx: click.Context, config_path: Path | None) -> None:
-    """OpenQuantMaster service command-line interface."""
+    """Run OpenQuantMaster services from the command line.
+
+    Services share the provider configuration but expose their own arguments.
+    Successful commands default to a human-readable rich view. Every service
+    also supports JSON output and JSONPath selection through '-o/--output'.
+    Failed commands print an error to stderr and return a non-zero exit code.
+    """
     ctx.obj = {"config_path": config_path}
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
@@ -40,9 +65,18 @@ def list_services() -> None:
         click.echo(f"{name}\t{command.get_short_help_str()}")
 
 
-@main.group()
+@main.group(epilog="Use 'qm-cli run SERVICE --help' for detailed service usage and examples.")
 def run() -> None:
-    """Run a service."""
+    """Run a service with its own arguments and output format."""
+
+
+output_option = click.option(
+    "--output",
+    "-o",
+    default="rich",
+    show_default=True,
+    help="Output: rich table, raw data JSON, or jsonpath={.field} applied to data.",
+)
 
 
 def register_cli(*, renderer: RichRenderer | None = None) -> Callable[[click.Command], click.Command]:

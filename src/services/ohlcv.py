@@ -118,7 +118,7 @@ class OHLCV(BaseService):
             options["secret"] = crypto.secret
         exchange = exchange_class(options)
         if crypto.sandbox and hasattr(exchange, "set_sandbox_mode"):
-            await exchange.set_sandbox_mode(True)
+            exchange.set_sandbox_mode(True)
 
         start_ms = self._iso_to_ms(inputs.start)
         end_ms = self._iso_to_ms(inputs.end)

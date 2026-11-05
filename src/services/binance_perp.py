@@ -4,6 +4,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from src.config import AppConfig
 from src.services.base import BaseService, ServiceResult
 
 Action = Literal[
@@ -58,9 +59,16 @@ class BinancePerpConfig(BaseModel):
 
     exchange: str = "binance"
     product: Literal["spot", "usdm"] = "usdm"
-    sandbox: bool = True
+    sandbox: bool = False
     api_key: str = ""
     secret: str = ""
+
+    @classmethod
+    def from_config(cls, config: AppConfig) -> BinancePerpConfig:
+        return cls(
+            api_key=config.providers.binance.api_key,
+            secret=config.providers.binance.secret,
+        )
 
 
 class BinancePerpInput(BaseModel):
@@ -213,7 +221,7 @@ class BinancePerp(BaseService):
         exchange = exchange_class(options)
         try:
             if self.cfg.sandbox and hasattr(exchange, "set_sandbox_mode"):
-                await exchange.set_sandbox_mode(True)
+                exchange.set_sandbox_mode(True)
 
             action = parsed.action
             if action == "balance":
