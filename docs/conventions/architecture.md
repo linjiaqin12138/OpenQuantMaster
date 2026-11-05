@@ -19,7 +19,7 @@ flowchart TD
 Smallest unit of work: one algorithm or one external boundary call.
 
 - Prefer **pure** functions (deterministic, no hidden I/O) **or** a **single** API/DB/file/network call.
-- Return domain results (data / raised errors), not `ServiceResult`.
+- Return `OperationResult` (`success`, `data`, `error` as the shared `Error | None`). Convert expected boundary failures into this result instead of raising them.
 - **Forbidden inside Operations:** calling Services, Protocol adapters, or other Operations that themselves orchestrate multi-step workflows.
 - Multi-step sequences, retries, branching, and transaction boundaries belong in a **Service**.
 
@@ -28,7 +28,7 @@ Smallest unit of work: one algorithm or one external boundary call.
 Programmable application API: orchestrates Operations and/or other Services.
 
 - Explicit **Pydantic** config / input / output models (JSON Schema–exportable for CLI and future REST).
-- Entry shape: `await Service(cfg).run({...})` → `ServiceResult` (`success`, `data`, `error` as `ServiceError | None`, optional `duration_seconds` on the call envelope).
+- Entry shape: `await Service(cfg).run({...})` → `ServiceResult` (`success`, `data`, `error` as the shared `Error | None`, optional `duration_seconds` on the call envelope).
 - May **compose** other Services; keep dependency direction acyclic.
 - Own side effects and consistency (e.g. call exchange, persist state).
 - A Service may be thin today (mostly one boundary) while still being the **public** unit Protocol calls; extract Operations when a step is reused or the workflow grows multi-step.

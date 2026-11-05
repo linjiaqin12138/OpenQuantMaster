@@ -4,34 +4,15 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
+
+from src.models.result import Error, OperationResult
+
+ServiceError = Error
 
 
-class ServiceError(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    code: str
-    message: str
-    exception: Exception | None = None
-
-
-class ServiceResult(BaseModel):
-    success: bool
-    data: dict[str, Any] = Field(default_factory=dict)
-    error: ServiceError | None = None
+class ServiceResult(OperationResult):
     duration_seconds: float = 0.0
-
-    @classmethod
-    def from_error(
-        cls,
-        code: str,
-        msg: str,
-        exception: Exception | None = None,
-    ) -> ServiceResult:
-        return cls(
-            success=False,
-            error=ServiceError(code=code, message=msg, exception=exception),
-        )
 
 
 class BaseService(ABC):

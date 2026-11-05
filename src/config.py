@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError
@@ -15,9 +16,21 @@ class TushareProviderConfig(BaseModel):
     token: str = ""
 
 
+class PushPlusProviderConfig(BaseModel):
+    token: str = ""
+    channel: str = "wechat"
+    timeout_seconds: float = Field(default=10, gt=0, alias="timeout")
+
+
 class ProvidersConfig(BaseModel):
     binance: BinanceProviderConfig = Field(default_factory=BinanceProviderConfig)
     tushare: TushareProviderConfig = Field(default_factory=TushareProviderConfig)
+    pushplus: PushPlusProviderConfig = Field(default_factory=PushPlusProviderConfig)
+
+
+class NotificationConfig(BaseModel):
+    provider: Literal["pushplus"] = "pushplus"
+    pushplus: PushPlusProviderConfig = Field(default_factory=PushPlusProviderConfig)
 
 
 class AppConfig(BaseModel):

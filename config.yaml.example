@@ -4,3 +4,7 @@ providers:
     secret: ""
   tushare:
     token: ""
+  pushplus:
+    token: ""
+    channel: wechat
+    timeout: 10

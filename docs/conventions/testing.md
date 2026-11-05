@@ -8,7 +8,7 @@ Tests should survive internal refactors. Prefer stable **public surfaces** — *
 
 - Drive behavior through a **Service**: construct with its config (or dependencies), then `await service.run({...})`.
 - **Operation** unit tests may call a single atomic Operation directly when asserting pure logic or one I/O boundary; do not use that shortcut for multi-step workflows (those belong under Service tests).
-- Assert on `ServiceResult` (`success`, `data`, `error` as `ServiceError | None` with `code` / `message` / `exception`) and documented output fields. Do not assert on private helpers or internal return types unless they are part of a published contract.
+- Assert on `ServiceResult` or `OperationResult` (`success`, `data`, `error` as the shared `Error | None` with `code` / `message` / `exception`) and documented output fields. Do not assert on private helpers or internal return types unless they are part of a published contract.
 - Internal modules may be rewritten freely; **entry parameters and output contracts should stay stable**.
 
 ## Patching

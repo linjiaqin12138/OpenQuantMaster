@@ -1,6 +1,6 @@
 # OpenQuantMaster
 
-Service-oriented quant building blocks under `src/services/` (`OHLCV`, `Indicator`, `BinancePerp`). Call them as `await Service(cfg).run({...})` → `ServiceResult`.
+Service-oriented quant building blocks under `src/services/` (`OHLCV`, `Indicator`, `BinancePerp`, `NotificationService`). Call them as `await Service(cfg).run({...})` → `ServiceResult`.
 
 Layering and test style: [`docs/conventions/`](docs/conventions/). Service references: [`docs/services/`](docs/services/).
 
@@ -44,6 +44,7 @@ qm-cli help
 qm-cli list
 qm-cli run ohlcv --symbol BTCUSDT --market crypto --interval 1h --limit 10
 qm-cli run indicator --symbol BTCUSDT --indicators sma,rsi,macd --patterns DOJI
+qm-cli run notification --title "Order filled" --content "BTCUSDT filled" --format markdown
 qm-cli run binance-perp balance
 ```
 

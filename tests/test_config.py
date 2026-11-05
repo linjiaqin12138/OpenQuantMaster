@@ -50,3 +50,18 @@ def test_load_config_parses_provider_models(tmp_path: Path):
     assert config.providers.binance.api_key == "key"
     assert config.providers.binance.secret == "secret"
     assert config.providers.tushare.token == "token"
+    assert config.providers.pushplus.channel == "wechat"
+    assert config.providers.pushplus.timeout_seconds == 10
+
+
+def test_load_config_parses_notification_provider(tmp_path: Path):
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "providers:\n  pushplus:\n    token: pushplus-token\n    timeout: 5\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(path)
+
+    assert config.providers.pushplus.token == "pushplus-token"
+    assert config.providers.pushplus.timeout_seconds == 5

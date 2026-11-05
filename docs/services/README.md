@@ -7,10 +7,11 @@ Application services live under `src/services/`. Each service has explicit Pydan
 | `OHLCV` | `src.services.ohlcv` | [ohlcv.md](./ohlcv.md) |
 | `Indicator` | `src.services.indicator` | [indicator.md](./indicator.md) |
 | `BinancePerp` | `src.services.binance_perp` | [binance_perp.md](./binance_perp.md) |
+| `NotificationService` | `src.services.notification` | [notification.md](./notification.md) |
 
 Call pattern:
 
 ```python
 result = await Service(cfg).run({...})  # dict → validated input model
-# result.success / result.data / result.error  # ServiceError(code, message, exception: Exception | None)
+# result.success / result.data / result.error  # Error(code, message, exception: Exception | None)
 ```
