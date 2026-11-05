@@ -4,8 +4,10 @@ import asyncio
 
 import click
 
+from src.config import load_config
 from src.entry.cli.base import echo_service_result, register_cli
-from src.services.ohlcv import OHLCV, OHLCVConfig
+from src.services.ohlcv import OHLCV
+from src.services.ohlcv import load_config as load_ohlcv_config
 
 
 @register_cli
@@ -26,7 +28,9 @@ from src.services.ohlcv import OHLCV, OHLCVConfig
     type=click.Choice(["ccxt", "yfinance", "tushare", "akshare"]),
     help="Force a market data provider.",
 )
+@click.pass_context
 def ohlcv(
+    ctx: click.Context,
     symbol: str,
     market: str,
     interval: str,
@@ -36,8 +40,12 @@ def ohlcv(
     source: str | None,
 ) -> None:
     """Fetch OHLCV bars and print the result as JSON."""
+    try:
+        config = load_config(ctx.obj["config_path"])
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
     result = asyncio.run(
-        OHLCV(OHLCVConfig()).run(
+        OHLCV(load_ohlcv_config(config)).run(
             {
                 "symbol": symbol,
                 "market": market,

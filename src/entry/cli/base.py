@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import click
 
@@ -8,9 +9,11 @@ from src.services.base import ServiceResult
 
 
 @click.group(invoke_without_command=True)
+@click.option("--config", "config_path", type=click.Path(path_type=Path), help="YAML config file path.")
 @click.pass_context
-def main(ctx: click.Context) -> None:
+def main(ctx: click.Context, config_path: Path | None) -> None:
     """OpenQuantMaster service command-line interface."""
+    ctx.obj = {"config_path": config_path}
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 

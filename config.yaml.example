@@ -1,62 +1,6 @@
-app_name: OpenQuantMaster
-environment: development
-
-paths:
-  artifacts: ./artifacts
-  logs: ./logs
-  database: ./data/runtime.db
-  pipelines: ./pipelines
-
-scheduler:
-  timezone: UTC
-
-event_bus:
-  backend: memory
-
-logging:
-  level: INFO
-  format: json
-
-exchanges:
+providers:
   binance:
     apiKey: ""
     secret: ""
-    spot:
-      ccxt_id: binance
-      sandbox: false
-    usdm:
-      ccxt_id: binanceusdm
-      sandbox: true
-      # Optional product-level key override:
-      # apiKey: ""
-      # secret: ""
-
-market_data:
-  crypto:
-    exchange: binance
-    product: spot
-  equities:
-    tushare_token: ""
-    yfinance_timeout: 30
-
-execution:
-  binance_perp:
-    exchange: binance
-    product: usdm
-
-notifier:
-  telegram:
-    enabled: false
-    bot_token: ""
-    chat_id: ""
-  pushplus:
-    enabled: true
+  tushare:
     token: ""
-  email:
-    enabled: false
-    smtp_host: ""
-    smtp_port: 465
-    username: ""
-    password: ""
-    from_addr: ""
-    to_addrs: []

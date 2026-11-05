@@ -47,6 +47,14 @@ qm-cli run ohlcv --symbol BTCUSDT --market crypto --interval 1h --limit 10
 
 Use `qm-cli run ohlcv --help` for all OHLCV options. Commands print the service result as JSON, including `success`, `data`, `error`, and `duration_seconds`. Invalid arguments or failed service calls return a non-zero exit code. Live OHLCV calls access external market-data providers.
 
+Service commands load YAML configuration from `--config PATH`, `./config.yaml`, or `~/.qm/config.yaml`, in that order. For example:
+
+```bash
+qm-cli --config /path/to/config.yaml run ohlcv --symbol BTCUSDT --market crypto --interval 1h
+```
+
+See `config.yaml.example` for the provider configuration structure.
+
 ## Run tests
 
 From the repo root with the venv activated:

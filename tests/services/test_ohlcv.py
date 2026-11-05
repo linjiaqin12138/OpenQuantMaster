@@ -3,7 +3,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pandas as pd
 import pytest
 
+from src.config import AppConfig
 from src.services.ohlcv import OHLCV, OHLCVConfig, OHLCVCryptoConfig
+from src.services.ohlcv import load_config as load_ohlcv_config
 
 
 @pytest.mark.unit
@@ -104,3 +106,23 @@ async def test_ohlcv_fetches_a_share_akshare_fallback():
     assert result.data["market"] == "a_share"
     assert result.data["rows"] == 1
     assert result.data["bars"][0]["close"] == 10.5
+
+
+def test_ohlcv_load_config_extracts_provider_settings():
+    app_config = AppConfig.model_validate(
+        {
+            "providers": {
+                "binance": {"apiKey": "key", "secret": "secret"},
+                "tushare": {"token": "token"},
+            }
+        }
+    )
+
+    config = load_ohlcv_config(app_config)
+
+    assert config.crypto.exchange == "binance"
+    assert config.crypto.product == "spot"
+    assert config.crypto.sandbox is False
+    assert config.crypto.api_key == "key"
+    assert config.crypto.secret == "secret"
+    assert config.tushare_token == "token"
