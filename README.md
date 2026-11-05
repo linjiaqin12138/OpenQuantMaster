@@ -45,7 +45,15 @@ qm-cli list
 qm-cli run ohlcv --symbol BTCUSDT --market crypto --interval 1h --limit 10
 ```
 
-Use `qm-cli run ohlcv --help` for all OHLCV options. Commands print the service result as JSON, including `success`, `data`, `error`, and `duration_seconds`. Invalid arguments or failed service calls return a non-zero exit code. Live OHLCV calls access external market-data providers.
+Use `qm-cli run ohlcv --help` for all OHLCV options. The default `rich` output uses a service-specific renderer; services without one fall back to JSON. Successful JSON output contains only the service `data`, while failures contain only the error and exit non-zero. Live OHLCV calls access external market-data providers.
+
+Select JSON output or apply a JSONPath expression to the successful `data` value:
+
+```bash
+qm-cli run ohlcv --symbol BTCUSDT --market crypto --interval 1h --limit 10 -o json
+qm-cli run ohlcv --symbol BTCUSDT --market crypto --interval 1h -o 'jsonpath={.bars}'
+qm-cli run ohlcv ... -o json > result.json
+```
 
 Service commands load YAML configuration from `--config PATH`, `./config.yaml`, or `~/.qm/config.yaml`, in that order. For example:
 

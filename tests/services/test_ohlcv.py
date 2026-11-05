@@ -5,7 +5,6 @@ import pytest
 
 from src.config import AppConfig
 from src.services.ohlcv import OHLCV, OHLCVConfig, OHLCVCryptoConfig
-from src.services.ohlcv import load_config as load_ohlcv_config
 
 
 @pytest.mark.unit
@@ -108,7 +107,7 @@ async def test_ohlcv_fetches_a_share_akshare_fallback():
     assert result.data["bars"][0]["close"] == 10.5
 
 
-def test_ohlcv_load_config_extracts_provider_settings():
+def test_ohlcv_config_from_app_config_extracts_provider_settings():
     app_config = AppConfig.model_validate(
         {
             "providers": {
@@ -118,7 +117,7 @@ def test_ohlcv_load_config_extracts_provider_settings():
         }
     )
 
-    config = load_ohlcv_config(app_config)
+    config = OHLCVConfig.from_config(app_config)
 
     assert config.crypto.exchange == "binance"
     assert config.crypto.product == "spot"

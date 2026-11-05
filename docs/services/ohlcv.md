@@ -17,7 +17,7 @@ Injected at construction: `OHLCV(cfg)`.
 
 Provider adapters (e.g. CCXT class ids) stay inside the service; callers only use exchange/product.
 
-Use `load_config(AppConfig)` from `src.services.ohlcv` to construct `OHLCVConfig` from the global provider configuration. The service extracts Binance credentials and the Tushare token itself.
+Use `OHLCVConfig.from_config(AppConfig)` to construct the service config from the global provider configuration. The service extracts Binance credentials and the Tushare token itself.
 
 ## Input (`OHLCVInput`)
 

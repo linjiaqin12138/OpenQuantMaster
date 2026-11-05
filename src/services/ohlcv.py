@@ -34,15 +34,15 @@ class OHLCVConfig(BaseModel):
     crypto: OHLCVCryptoConfig = Field(default_factory=OHLCVCryptoConfig)
     tushare_token: str = ""
 
-
-def load_config(config: AppConfig) -> OHLCVConfig:
-    return OHLCVConfig(
-        crypto=OHLCVCryptoConfig(
-            api_key=config.providers.binance.api_key,
-            secret=config.providers.binance.secret,
-        ),
-        tushare_token=config.providers.tushare.token,
-    )
+    @classmethod
+    def from_config(cls, config: AppConfig) -> OHLCVConfig:
+        return cls(
+            crypto=OHLCVCryptoConfig(
+                api_key=config.providers.binance.api_key,
+                secret=config.providers.binance.secret,
+            ),
+            tushare_token=config.providers.tushare.token,
+        )
 
 
 class OHLCVInput(BaseModel):
