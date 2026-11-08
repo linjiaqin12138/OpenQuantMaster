@@ -101,7 +101,8 @@ project_root/
 │   ├── operations/         # 无状态第三方调用和数据库操作
 │   ├── ports/              # 可选：需要替换的外部能力接口
 │   ├── adapters/           # 可选：Port 的具体实现与 Provider 适配
-│   ├── models/             # Result、Error 和共享数据结构
+│   ├── models/             # Result、Error 和跨层共享的核心领域数据结构
+│   ├── utils/              # 可选：通用、无副作用的函数与装饰器
 │   └── config.py           # 配置模型与加载
 └── tests/
     ├── services/
@@ -110,6 +111,25 @@ project_root/
 ```
 
 The names `entrypoints` and `interfaces` may replace `protocols` when they better describe the application. The dependency rules matter more than the directory names.
+
+## Model placement
+
+`models/` contains the common Result/Error types and stable domain or core data structures genuinely shared across layers. It is not a catch-all location for every Pydantic class. The distinction is semantic, not technical: type annotations, validation, and inheriting from `BaseModel` describe a class's structure, not whether it represents a domain concept.
+
+Service input/output models are application API contracts, not domain models by default. They describe the input and output of one application operation, including interface-specific defaults and validation. For example, a `limit <= 5000` rule on `OHLCVInput` is a constraint of that Service API, not a universal rule about market data. Define these models next to the Service that owns them, for example in `services/ohlcv.py`, and let Protocols import them from there. A UseCase may accept and return those same models, or define its own models next to the UseCase when its application contract differs.
+
+By contrast, a domain or core model represents a stable business concept independently of any single operation or transport. For example, a `Bar` model shared by market-data, indicator, and strategy code describes the business data itself rather than the parameters of one request. Move a model into `models/` only when it has this kind of stable meaning and is genuinely shared by multiple Services or UseCases. Merely appearing in a Service response does not make it a domain model.
+
+Do not add long `models/__init__.py` re-export lists merely to collect request and response classes in one place.
+
+## Generic utilities
+
+Use `src/utils/` for small, reusable, domain-agnostic functions and decorators: retry/backoff decorators, time parsing, text normalization, sorting/grouping helpers, and similar "lodash-like" tools.
+
+- Utilities have no configuration, environment, network, database, or global-state dependencies. A utility may wrap an effectful call, as a retry decorator does, but the caller supplies the effect and policies such as attempts, backoff, and retryable errors; application retry policy still belongs to the UseCase.
+- `utils/` must not import Services, UseCases, Operations, or domain models. It sits below all application layers.
+- Name modules by capability, for example `utils/retry.py` or `utils/time.py`; do not create a catch-all `common.py`.
+- Keep a helper next to its only caller while it is provider- or domain-specific. Promote it to `utils/` only when it is generic and actually reused.
 
 ## Protocol
 
@@ -188,7 +208,7 @@ A UseCase encapsulates one complete application action behind a standard `run()`
 - Own application policies such as retries and compensation.
 - Own database transaction boundaries.
 - Do not read global configuration, locate Services, or depend on Protocol frameworks.
-- Prefer typed input and output models over internal `dict[str, Any]` contracts. Protocol adapters handle conversion to and from transport representations.
+- Prefer typed input and output models over internal `dict[str, Any]` contracts. Protocol adapters handle conversion to and from transport representations. Define these contracts according to **Model placement**.
 
 Services and composed UseCases depend on the `BaseUseCase` abstraction rather than concrete UseCase types. The base `run()` method provides consistent timing and exception-to-Result conversion:
 
@@ -241,7 +261,7 @@ class ExecuteActionUseCase(BaseUseCase):
 
 A UseCase may instead call the original throwing Operation and let `BaseUseCase.run()` convert an otherwise unhandled exception into the default error Result.
 
-Tests may monkeypatch the concrete Operation or third-party SDK. Operations are suitable patch targets because they are deliberately thin wrappers around HTTP or other protocols: their parameters and responses are stable, their remote-call details are hidden, and their simplicity makes disruptive refactoring unlikely. Do not introduce an Operation interface solely for testing. Avoid patching internal helper functions or other internal objects whose structure may change during refactoring.
+Tests may monkeypatch the concrete Operation or third-party SDK. Operations are suitable patch targets because they are deliberately thin wrappers around HTTP or other protocols: their parameters and responses are stable, their remote-call details are hidden, and their simplicity makes disruptive refactoring unlikely. A mocked Operation returns the Operation's documented provider-level output, including any provider-local normalization it owns; application workflows and request-specific shaping remain real UseCase behavior under test. Do not introduce an Operation interface solely for testing. Avoid patching internal helper functions or other internal objects whose structure may change during refactoring.
 
 When multiple providers require replacement, the Service owns the selected Port and supplies it to the relevant UseCase. A test Port may then be supplied through the Service. Until that requirement exists, call concrete Operations directly.
 
@@ -344,6 +364,29 @@ call_remote_api_result = as_operation_result(
 
 Callers may choose either form. The throwing form avoids repetitive success checks and lets exceptions propagate naturally. The Result form supports explicit error-code mapping. The decorator accepts an exception mapper so each boundary can assign stable error codes.
 
+### Operation output and provider normalization
+
+Operations do not depend on Service input/output models or core domain models. Their default output is plain data such as `dict`, `list`, or SDK records.
+
+A structured transport type is justified when plain data would be ambiguous or unsafe to consume—for example, a provider response with many similarly named fields whose types matter. In that case define a small dataclass, `TypedDict`, or Pydantic model **in the Operation module**, mirroring the provider's wire fields and types. It is a typed view of that provider response, not a shared domain model: no application behavior, no cross-provider abstraction, and no re-export from `models/`. Callers import it from the concrete Operation module only when they need its type information. Do not create such a class for every response; a clear `dict` is enough for most calls.
+
+An Operation may perform lightweight, provider-local transformation when it is part of hiding that provider's details: field renaming, timestamp parsing to one canonical representation, deterministic identifier derivation, or response filtering required by the provider's API semantics. Keep it when all of the following hold:
+
+- Every caller needs the same transformation; otherwise keep the richer response and let callers shape it.
+- It depends only on the Operation's inputs and provider response, not on configuration, global state, or other providers.
+- It does not implement caller-specific or business policy, such as keyword rules, cross-source deduplication, ranking, or aggregation.
+- It preserves information callers may reasonably need; do not trim a rich provider response to one caller's current view.
+
+This avoids repeating identical conversion at every call site without turning the Operation into a workflow. When the transformation is more than a few lines, implement it as a pure function in the same provider module, or an adjacent provider-specific helper, and call it from the Operation so it can be tested without network access.
+
+The Operation's documented output, including these normalizations, is its mock contract. Tests that replace the Operation return that normalized output; tests for the transformation itself patch the external SDK or call the pure helper directly. Cross-provider or request-specific shaping still belongs to the UseCase.
+
+### Client construction and connection lifetime
+
+The default is to construct and close an HTTP/SDK client within the Operation call. Repeated setup can be factored into a private helper, but that helper must not return a module-global singleton. Do not use a default client, default credentials, or mutable module state to make parameters optional: different accounts, credentials, sandbox modes, and products must not leak between calls, and tests must remain isolated.
+
+Introduce client reuse only for a concrete latency or resource requirement. In that case, the Service owns the long-lived client or client factory and its shutdown, supplies it to the UseCase, and the Operation receives the client as an explicit parameter. The Operation does not silently cache or close a client owned by an upper layer. A client factory is not a Port; do not introduce a Port solely for connection reuse.
+
 ### Database Operations
 
 - Accept the current database session as a parameter.
@@ -383,6 +426,10 @@ class OperationResult:
             error=Error(code=code, message=message, exception=exception),
         )
 ```
+
+`Error.code` is the stable classification used across layer boundaries. Do not build a hierarchy of provider-specific exception classes in `operations/base.py` or use exception class names as the caller's branching contract.
+
+Prefer to let original HTTP/SDK exceptions propagate and translate expected ones in `map_error`. If an Operation itself must raise an already categorized failure, use at most one generic `OperationError` carrying `code` and `message`; distinguish `provider_rejected`, `provider_request_failed`, and similar cases by code rather than separate classes. Provider-specific mapping functions remain in the provider's Operation module. Programming errors and unexpected exceptions still propagate unchanged.
 
 The decorator converts successful return values into successful Results. Its mapper returns an `Error` for expected exceptions and returns `None` for exceptions that must continue to propagate:
 
@@ -542,4 +589,4 @@ When introduced:
 
 ## Summary
 
-Services group related application operations and own dependencies. UseCases own application workflows and transactions. Operations perform stateless external calls. Ports are introduced only when replacement or multiple implementations provide concrete value.
+Services group related application operations and own dependencies; their input/output models stay next to them by default. UseCases own application workflows, request-specific and cross-provider shaping, and transactions. Operations perform stateless external calls, return provider-level values without depending on application models, and may own lightweight provider-local normalization shared by every caller. Generic side-effect-free helpers live in `utils/`. Error codes, not provider-specific exception hierarchies, are the cross-layer classification contract. Ports are introduced only when replacement or multiple implementations provide concrete value.
