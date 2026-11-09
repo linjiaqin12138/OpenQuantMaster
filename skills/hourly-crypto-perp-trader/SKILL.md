@@ -60,6 +60,7 @@ description: 通过 qm-cli 监控并交易 Binance USDT-M 永续合约。默认�
 qm-cli help
 qm-cli list
 qm-cli run ohlcv --help
+qm-cli run ticker --help
 qm-cli run indicator --help
 qm-cli run news-fetcher --help
 qm-cli run binance-perp --help
@@ -130,6 +131,14 @@ agent 当前可用额度按有效资金扣除当前仓位占用保证金和挂�
 qm-cli run ohlcv --symbol BTCUSDT --market crypto --interval 1h --limit 200 -o json
 ```
 
+最新快照价格（可选但推荐，用于 sizing 与现价判断）：
+
+```bash
+qm-cli run ticker --symbol BTC/USDT:USDT --market crypto -o json
+```
+
+`ticker` 使用配置的 Binance 交易所；带 `:USDT` 的合约代码自动走 U 本位合约交易所。它返回 `price`、`quote_time` 和 `fetched_at`，`quote_time` 才是行情时间。K 线最新一根已收盘时，用 `ticker` 的 `price` 作为当前价格，并在周期结果中标注报价时间。
+
 `patterns: ALL` 必须展开为以下全部 TA-Lib K 线形态，不得用 `ALL` 作为命令参数，也不能因输出较长而自行删减：
 
 ```text
@@ -164,6 +173,7 @@ qm-cli run binance-perp balance -o json
 检查：
 
 - 记录本周期时间、K 线最新时间、指标、新闻实际覆盖时间、agent 有效额度、仓位方向/数量/入场价/杠杆，以及普通和条件挂单。
+- 记录 `ticker` 的 `price` 与 `quote_time`。ticker 失败、缺少报价时间或报价时间明显早于本周期时，按行情数据过期处理，不据此开仓或扩大仓位。
 - 对返回的每项指标和每种 K 线形态检查是否存在单项 `error`；整体命令成功不代表所有计算都有效。部分形态没有信号是正常结果，不等于计算失败。
 - 新闻服务可能部分来源成功；将 `errors` 视为需要通知的报错，并明确哪些来源缺失。新闻不是固定时间窗口，不得声称覆盖某个固定时段，除非实际时间戳支持。
 - 对重复新闻按 id/URL 和内容语义去重，区分已确认事实、市场评论和未证实消息；不要把单条新闻当成确定交易信号。

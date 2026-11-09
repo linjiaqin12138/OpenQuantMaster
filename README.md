@@ -1,6 +1,6 @@
 # OpenQuantMaster
 
-Service-oriented quant building blocks under `src/services/` (`OHLCV`, `Indicator`, `NewsFetcher`, `BinancePerp`, `NotificationService`). Each service is a facade with semantically named methods: `await service.fetch_bars({...})` → `ServiceResult`.
+Service-oriented quant building blocks under `src/services/` (`OHLCV`, `Ticker`, `Indicator`, `NewsFetcher`, `BinancePerp`, `NotificationService`). Each service is a facade with semantically named methods: `await service.fetch_bars({...})` → `ServiceResult`. `Ticker.fetch_ticker()` provides latest A-share and crypto snapshots through the existing Tushare and Binance configurations, complementing historical OHLCV bars.
 
 The code follows a layered architecture: `src/protocols/` (CLI) → `src/services/` (facade) → `src/use_cases/` (workflow) → `src/providers/` (third-party calls), with shared types in `src/models/`, generic helpers in `src/utils/`, the external configuration format in `src/config.py`, and the composition boundary in `src/composition.py`.
 

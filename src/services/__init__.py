@@ -11,6 +11,7 @@ from src.services.indicator import Indicator
 from src.services.news_fetcher import NewsFetcher
 from src.services.notification import NotificationService
 from src.services.ohlcv import OHLCV
+from src.services.ticker import Ticker
 
 __all__ = [
     "BaseService",
@@ -19,4 +20,5 @@ __all__ = [
     "NewsFetcher",
     "NotificationService",
     "OHLCV",
+    "Ticker",
 ]

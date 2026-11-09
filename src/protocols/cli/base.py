@@ -24,6 +24,7 @@ _CLI_ERROR_CODES = {
     "invalid_output": "INVALID_OUTPUT",
     "unsupported_market": "UNSUPPORTED_MARKET",
     "unsupported_source": "UNSUPPORTED_SOURCE",
+    "ambiguous_symbol": "AMBIGUOUS_SYMBOL",
     "market_data_unavailable": "MARKET_DATA_UNAVAILABLE",
     "market_data_rejected": "MARKET_DATA_REJECTED",
     "market_data_failed": "MARKET_DATA_FAILED",

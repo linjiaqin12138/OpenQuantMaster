@@ -14,12 +14,14 @@ from src.services.binance_perp import BinancePerp, BinancePerpServiceConfig
 from src.services.indicator import Indicator, IndicatorServiceConfig
 from src.services.notification import NotificationService, NotificationServiceConfig
 from src.services.ohlcv import OHLCV, OHLCVServiceConfig
+from src.services.ticker import Ticker, TickerServiceConfig
 
 __all__ = [
     "build_binance_perp_service",
     "build_indicator_service",
     "build_notification_service",
     "build_ohlcv_service",
+    "build_ticker_service",
 ]
 
 
@@ -34,6 +36,21 @@ def build_ohlcv_service(config: AppConfig) -> OHLCV:
             api_key=binance.api_key,
             secret=binance.secret,
             tushare_token=config.providers.tushare.token,
+        )
+    )
+
+
+def build_ticker_service(config: AppConfig) -> Ticker:
+    """Build the ticker service for the configured providers."""
+    binance = config.providers.binance
+    return Ticker(
+        TickerServiceConfig(
+            tushare_token=config.providers.tushare.token,
+            exchange=binance.exchange or "binance",
+            product=binance.product or "spot",
+            sandbox=binance.sandbox,
+            api_key=binance.api_key,
+            secret=binance.secret,
         )
     )
 

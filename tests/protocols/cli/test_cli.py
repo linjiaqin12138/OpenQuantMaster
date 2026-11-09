@@ -192,3 +192,71 @@ def test_a_jsonpath_selection_applies_to_the_service_data(config_file, monkeypat
 
     assert result.exit_code == 0
     assert json.loads(result.stdout) == 1
+
+
+TICKER = {
+    "name": "贵州茅台",
+    "price": 1444.05,
+    "previous_close": 1453.0,
+    "open": 1440.0,
+    "high": 1449.99,
+    "low": 1435.08,
+    "change": -8.95,
+    "change_percent": -0.61610599,
+    "quote_time": "2026-11-09T06:30:00Z",
+}
+
+
+def _ticker_config_file(tmp_path):
+    path = tmp_path / "tushare-config.yaml"
+    path.write_text('providers:\n  tushare:\n    token: "token"\n', encoding="utf-8")
+    return path
+
+
+@pytest.mark.unit
+def test_ticker_json_output_contains_the_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "src.use_cases.ticker.fetch_a_share_ticker_result",
+        _provider(TICKER),
+    )
+
+    result = _run(
+        _ticker_config_file(tmp_path),
+        "ticker",
+        "--symbol",
+        "600519.SH",
+        "--market",
+        "a_share",
+        "-o",
+        "json",
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["symbol"] == "600519.SH"
+    assert payload["price"] == 1444.05
+    assert payload["quote_time"] == "2026-11-09T06:30:00Z"
+    assert payload["fetched_at"].endswith("Z")
+
+
+@pytest.mark.unit
+def test_ticker_provider_errors_use_the_existing_cli_contract(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "src.use_cases.ticker.fetch_a_share_ticker_result",
+        _failing_provider("provider_unavailable"),
+    )
+
+    result = _run(
+        _ticker_config_file(tmp_path),
+        "ticker",
+        "--symbol",
+        "600519.SH",
+        "--market",
+        "a_share",
+        "-o",
+        "json",
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stderr)
+    assert payload["error"]["code"] == "MARKET_DATA_UNAVAILABLE"

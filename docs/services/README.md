@@ -6,7 +6,8 @@ A service owns its configuration and only delegates through semantically named m
 
 | Service | Capability | Methods |
 |---------|------------|---------|
-| `OHLCV` | market data | `fetch_bars()` |
+| `OHLCV` | historical market data | `fetch_bars()` |
+| `Ticker` | latest A-share and crypto snapshots | `fetch_ticker()` |
 | `Indicator` | technical analysis | `compute()` |
 | `NewsFetcher` | news | `fetch_recent()`, `fetch_stock_news()` |
 | `NotificationService` | notification | `send()` |

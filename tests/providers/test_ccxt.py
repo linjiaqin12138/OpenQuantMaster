@@ -7,6 +7,7 @@ from src.providers.ccxt import (
     fetch_balance,
     fetch_crypto_ohlcv,
     fetch_crypto_ohlcv_result,
+    fetch_crypto_ticker,
     fetch_open_orders,
 )
 
@@ -23,6 +24,23 @@ class FakeExchange:
         type(self).instances.append(self)
         self.fetch_ohlcv = AsyncMock(
             return_value=[[1_700_000_000_000, 100.0, 110.0, 90.0, 105.0, 1000.0]]
+        )
+        self.fetch_ticker = AsyncMock(
+            return_value={
+                "symbol": "BTC/USDT:USDT",
+                "timestamp": 1_700_000_000_000,
+                "datetime": "2023-11-14T22:13:20.000Z",
+                "last": 105.0,
+                "open": 100.0,
+                "high": 110.0,
+                "low": 90.0,
+                "previousClose": 99.0,
+                "change": 6.0,
+                "percentage": 6.06,
+                "bid": 104.9,
+                "ask": 105.1,
+                "info": {},
+            }
         )
         self.fetch_balance = AsyncMock(
             return_value={
@@ -76,6 +94,25 @@ async def test_fetch_crypto_ohlcv_normalizes_rows(ccxt_fake):
         }
     ]
     assert ccxt_fake.instances[0].set_sandbox_mode.called is True
+    assert ccxt_fake.instances[0].close.await_count == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_fetch_crypto_ticker_normalizes_the_snapshot(ccxt_fake):
+    ticker = await fetch_crypto_ticker(
+        venue=CcxtVenue(exchange="binance", product="usdm"),
+        symbol="BTC/USDT:USDT",
+    )
+
+    assert ticker["name"] == "BTC/USDT:USDT"
+    assert ticker["price"] == 105.0
+    assert ticker["previous_close"] == 99.0
+    assert ticker["change"] == 6.0
+    assert ticker["change_percent"] == 6.06
+    assert ticker["bid"] == 104.9
+    assert ticker["ask"] == 105.1
+    assert ticker["quote_time"] == "2023-11-14T22:13:20Z"
     assert ccxt_fake.instances[0].close.await_count == 1
 
 

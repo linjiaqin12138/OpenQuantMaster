@@ -1,6 +1,6 @@
 # OHLCV
 
-Fetch OHLCV bars for crypto, US/HK equities, or A-shares. Returns rows in `data.bars` (no artifacts).
+Fetch OHLCV bars for crypto, US/HK equities, or A-shares. Returns rows in `data.bars` (no artifacts). OHLCV provides historical bar context, not a latest-quote snapshot; use [Ticker](ticker.md) for current A-share prices with a provider quote timestamp.
 
 ## Method
 

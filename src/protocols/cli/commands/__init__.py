@@ -4,6 +4,7 @@ from src.protocols.cli.commands.indicator import indicator, render_indicator
 from src.protocols.cli.commands.news_fetcher import news_fetcher, render_news_fetcher
 from src.protocols.cli.commands.notification import notification, render_notification
 from src.protocols.cli.commands.ohlcv import ohlcv, render_ohlcv
+from src.protocols.cli.commands.ticker import ticker, render_ticker
 
 
 def register_services() -> None:
@@ -12,3 +13,4 @@ def register_services() -> None:
     register_service(news_fetcher, renderer=render_news_fetcher)
     register_service(notification, renderer=render_notification)
     register_service(ohlcv, renderer=render_ohlcv)
+    register_service(ticker, renderer=render_ticker)

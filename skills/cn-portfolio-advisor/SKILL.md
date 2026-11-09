@@ -14,6 +14,7 @@ description: 在 A 股交易日盘前、午间收盘后和下午收盘前，通�
 ## 硬性要求
 
 - 行情、新闻和通知必须通过 `qm-cli`；不要直接调用数据商 SDK、HTTP API 或编写脚本绕过它。假设 `qm-cli` 已在 PATH 中，直接运行，不传 `--config`。
+- 实时快照依赖标准 provider 配置中的 Tushare Token；Token 缺失或权限不足时按“行情失败或过期”处理，不改用其他数据源绕过。
 - 不要阅读、搜索或翻查 qm-cli / OpenQuantMaster 源码来了解用法。只能使用本 Skill 列出的命令，以及下列帮助命令；未列出的服务或子命令不要执行。
 - 本地状态文件使用文件工具读写。不得把凭据、通知 Token、环境变量内容或配置秘密写入状态、日志、通知和回复。
 - 持仓是用户提供的静态快照，不从行情、新闻或建议推断实际成交。只有用户明确告知变动，或用户提供更高 `portfolio_revision` 的持仓配置时，才能修改持仓。
@@ -66,6 +67,7 @@ description: 在 A 股交易日盘前、午间收盘后和下午收盘前，通�
 qm-cli help
 qm-cli list
 qm-cli run ohlcv --help
+qm-cli run ticker --help
 qm-cli run news-fetcher --help
 qm-cli run notification --help
 ```
@@ -120,14 +122,18 @@ qm-cli run notification --help
 
 ### 2. 获取行情
 
-对基准和每个持仓分别运行以下命令，将代码替换为实际配置；不执行未列出的批量或实时行情命令：
+对基准和每个持仓分别运行以下两类命令，将代码替换为实际配置；不执行未列出的批量行情命令：
 
 ```bash
 qm-cli run ohlcv --symbol 000300.SH --market a_share --interval 1d --limit 120 -o json
+qm-cli run ticker --symbol 000300.SH --market a_share -o json
 qm-cli run ohlcv --symbol 600519.SH --market a_share --interval 1d --limit 120 -o json
+qm-cli run ticker --symbol 600519.SH --market a_share -o json
 ```
 
-检查返回条码、最新时间和异常。盘前最新完整日线通常是上一交易日；午间和尾盘若只有上一交易日数据，必须注明缺少当日行情，不给出依赖精确现价的建议。不得把日线数据声称为实时报价。
+`ohlcv` 只提供历史日线上下文，最新完整日线通常是上一交易日；不得把日线收盘价声称为实时报价。盘中现价、涨跌幅、持仓市值和数量计算使用 `ticker` 返回的 `price`，同时记录 `source`、`quote_time` 和 `fetched_at`。`quote_time` 是行情源报价时间，`fetched_at` 是本地抓取时间，两者不得混淆。A 股代码可以省略交易所后缀（如 `515070`），服务会按代码前缀依次校验各交易所，响应里的 `symbol` 是实际解析到的代码。若返回 `AMBIGUOUS_SYMBOL`，说明同一代码在多个交易所都有挂牌（例如 `000001` 同时是上证指数和平安银行），必须改用带后缀的代码重试，不得自行猜测。
+
+检查返回条码、报价时间和异常。盘前报价可能仍属于上一交易日，必须按实际 `quote_time` 披露；午间和尾盘的 `quote_time` 必须属于当日且与本次运行时间相符，否则视为过期行情。ticker 失败、缺少 Token、报价过期或字段异常时，不给出依赖精确现价或数量的新增建议，也不得退回用日线收盘价冒充现价；其他可靠数据仍可支持保守建议。
 
 ### 3. 获取增量新闻
 

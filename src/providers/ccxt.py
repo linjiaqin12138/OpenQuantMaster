@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+import math
+
 from src.models.result import AppError, Error, as_call_result
 
 # Adapter map only - callers use logical exchange/product names.
@@ -95,6 +97,16 @@ async def fetch_crypto_ohlcv(
     if until_ms is not None:
         bars = [bar for bar in bars if _to_ms(bar["timestamp"]) <= until_ms]
     return bars
+
+
+async def fetch_crypto_ticker(*, venue: CcxtVenue, symbol: str) -> dict[str, Any]:
+    """Fetch the latest ticker of one crypto symbol from a CCXT venue."""
+    client = _build_client(venue)
+    try:
+        raw = await client.fetch_ticker(symbol)
+    finally:
+        await client.close()
+    return _normalize_crypto_ticker(raw)
 
 
 async def fetch_balance(*, venue: CcxtVenue) -> dict[str, Any]:
@@ -208,6 +220,51 @@ def map_ccxt_error(exc: Exception) -> Error | None:
     return None
 
 
+def _normalize_crypto_ticker(raw: dict[str, Any]) -> dict[str, Any]:
+    info = raw.get("info") if isinstance(raw.get("info"), dict) else {}
+    price = _first_number(raw.get("last"), raw.get("close"))
+    if price is None:
+        raise ValueError("CCXT ticker contains no last price")
+    timestamp = raw.get("timestamp")
+    quote_time = None
+    if isinstance(timestamp, (int, float)) and timestamp > 0:
+        quote_time = (
+            datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+    elif raw.get("datetime"):
+        quote_time = str(raw["datetime"])
+    return {
+        "name": str(raw.get("symbol") or ""),
+        "price": price,
+        "previous_close": _first_number(
+            raw.get("previousClose"), info.get("prevClosePrice")
+        ),
+        "open": _first_number(raw.get("open"), info.get("openPrice")),
+        "high": _first_number(raw.get("high"), info.get("highPrice")),
+        "low": _first_number(raw.get("low"), info.get("lowPrice")),
+        "change": _first_number(raw.get("change"), info.get("priceChange")),
+        "change_percent": _first_number(raw.get("percentage"), info.get("priceChangePercent")),
+        "bid": _first_number(raw.get("bid"), info.get("bidPrice")),
+        "ask": _first_number(raw.get("ask"), info.get("askPrice")),
+        "quote_time": quote_time,
+    }
+
+
+def _first_number(*values: Any) -> float | None:
+    for value in values:
+        if value is None or isinstance(value, bool):
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(number):
+            return number
+    return None
+
+
 def _to_ms(timestamp: str) -> int:
     parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
     return int(parsed.timestamp() * 1000)
@@ -311,6 +368,7 @@ def _resolve_order_type(raw: dict[str, Any], info: dict[str, Any], order_kind: s
 
 
 fetch_crypto_ohlcv_result = as_call_result(fetch_crypto_ohlcv, map_error=map_ccxt_error)
+fetch_crypto_ticker_result = as_call_result(fetch_crypto_ticker, map_error=map_ccxt_error)
 fetch_balance_result = as_call_result(fetch_balance, map_error=map_ccxt_error)
 fetch_positions_result = as_call_result(fetch_positions, map_error=map_ccxt_error)
 fetch_open_orders_result = as_call_result(fetch_open_orders, map_error=map_ccxt_error)
