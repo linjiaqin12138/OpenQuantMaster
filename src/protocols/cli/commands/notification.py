@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import click
 from rich.console import Console
 
+from src.composition import build_notification_service
 from src.config import load_config
-from src.entry.cli.base import echo_service_result, output_option
-from src.services.notification import NotificationService
+from src.protocols.cli.base import echo_service_result, output_option, run_service
 
 
 def render_notification(data: dict[str, Any]) -> None:
@@ -44,9 +43,10 @@ def notification(ctx: click.Context, title: str, content: str, content_format: s
         config = load_config(ctx.obj["config_path"])
     except RuntimeError as exc:
         raise click.ClickException(str(exc)) from exc
-    result = asyncio.run(
-        NotificationService.from_config(config).run(
+    result = run_service(
+        build_notification_service(config).send(
             {"title": title, "content": content, "format": content_format}
-        )
+        ),
+        output=output,
     )
     echo_service_result(result, "notification", output)

@@ -42,7 +42,7 @@ Repository = "https://github.com/linjiaqin12138/OpenQuantMaster.git"
 Issues = "https://github.com/linjiaqin12138/OpenQuantMaster.git/issues"
 
 [project.scripts]
-qm-cli = "src.entry.cli:main"
+qm-cli = "src.protocols.cli:main"
 
 [project.optional-dependencies]
 dev = [

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Any
 
@@ -8,10 +7,9 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from src.composition import build_indicator_service
 from src.config import load_config
-from src.entry.cli.base import echo_service_result, output_option
-from src.services.indicator import Indicator
-from src.services.ohlcv import OHLCV, OHLCVConfig
+from src.protocols.cli.base import echo_service_result, output_option, run_service
 
 
 def render_indicator(data: dict[str, Any]) -> None:
@@ -91,9 +89,8 @@ def indicator(
             raise ValueError("indicator params must be a JSON object")
     except (RuntimeError, json.JSONDecodeError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
-    ohlcv_service = OHLCV(OHLCVConfig.from_config(config))
-    result = asyncio.run(
-        Indicator(ohlcv=ohlcv_service).run(
+    result = run_service(
+        build_indicator_service(config).compute(
             {
                 "symbol": symbol,
                 "market": market,
@@ -105,6 +102,7 @@ def indicator(
                 if patterns
                 else None,
             }
-        )
+        ),
+        output=output,
     )
     echo_service_result(result, "indicator", output)

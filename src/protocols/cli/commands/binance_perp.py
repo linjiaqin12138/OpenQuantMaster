@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Any
 
@@ -8,44 +7,50 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from src.composition import build_binance_perp_service
 from src.config import load_config
-from src.entry.cli.base import echo_service_result, output_option
-from src.services.binance_perp import BinancePerp, BinancePerpConfig
+from src.protocols.cli.base import echo_service_result, output_option, run_service
 
 
 def render_binance_perp(data: dict[str, Any]) -> None:
     console = Console()
-    console.print(
-        f"[bold]{data['action']}[/bold] {data['exchange']}/{data['product']} "
-        f"dry_run={data['dry_run']} sandbox={data['sandbox']}"
-    )
-    if data["planned"] is not None:
+    if "assets" in data:
+        table = Table("Asset", "Free", "Used", "Total")
+        for asset, values in data["assets"].items():
+            table.add_row(asset, str(values["free"]), str(values["used"]), str(values["total"]))
+        console.print(table)
+        return
+
+    if "dry_run" in data:
+        console.print(f"[bold]dry_run={data['dry_run']}[/bold]")
+        payload = data.get("planned") or data.get("order") or data.get("result")
+        if payload is None:
+            console.print("No payload returned.")
+            return
         table = Table("Field", "Value")
-        for key, value in data["planned"].items():
+        for key, value in payload.items():
             table.add_row(key, json.dumps(value, ensure_ascii=False))
         console.print(table)
         return
 
-    result = data["result"]
-    if data["action"] == "balance":
-        table = Table("Asset", "Free", "Used", "Total")
-        for asset, values in result["assets"].items():
-            table.add_row(asset, str(values["free"]), str(values["used"]), str(values["total"]))
-        console.print(table)
-    elif isinstance(result, list):
-        if not result:
+    for key in ("positions", "orders"):
+        rows = data.get(key)
+        if rows is None:
+            continue
+        if not rows:
             console.print("No results returned.")
             return
-        columns = list(result[0])
-        table = Table(*(column for column in columns))
-        for row in result:
+        columns = list(rows[0])
+        table = Table(*columns)
+        for row in rows:
             table.add_row(*(json.dumps(row.get(column), ensure_ascii=False) for column in columns))
         console.print(table)
-    elif isinstance(result, dict):
-        table = Table("Field", "Value")
-        for key, value in result.items():
-            table.add_row(key, json.dumps(value, ensure_ascii=False))
-        console.print(table)
+        return
+
+    table = Table("Field", "Value")
+    for key, value in data.items():
+        table.add_row(key, json.dumps(value, ensure_ascii=False))
+    console.print(table)
 
 
 @click.command(
@@ -55,7 +60,7 @@ def render_binance_perp(data: dict[str, Any]) -> None:
 Examples:
   qm-cli run binance-perp balance
   qm-cli run binance-perp positions --symbol BTC/USDT:USDT
-  qm-cli run binance-perp open_orders --exclude-conditional
+  qm-cli run binance-perp open_orders --symbol BTC/USDT:USDT --exclude-conditional
   qm-cli run binance-perp create_order --symbol BTC/USDT:USDT --side buy --order-type market --amount 0.001
   qm-cli run binance-perp set_leverage --symbol BTC/USDT:USDT --leverage 5
   qm-cli run binance-perp cancel_order --symbol BTC/USDT:USDT --order-id 12345 --live
@@ -137,11 +142,19 @@ def binance_perp(
         config = load_config(ctx.obj["config_path"])
     except RuntimeError as exc:
         raise click.ClickException(str(exc)) from exc
-    result = asyncio.run(
-        BinancePerp(BinancePerpConfig.from_config(config)).run(
+
+    service = build_binance_perp_service(config)
+    if action == "balance":
+        call = service.balance()
+    elif action == "positions":
+        call = service.positions({"symbol": symbol})
+    elif action == "open_orders":
+        call = service.open_orders(
+            {"symbol": symbol, "include_conditional": include_conditional}
+        )
+    elif action == "create_order":
+        call = service.create_order(
             {
-                "action": action,
-                "dry_run": dry_run,
                 "symbol": symbol,
                 "side": side,
                 "order_type": order_type,
@@ -150,16 +163,27 @@ def binance_perp(
                 "stop_price": stop_price,
                 "callback_rate": callback_rate,
                 "activation_price": activation_price,
-                "order_id": order_id,
-                "leverage": leverage,
-                "margin_mode": margin_mode,
                 "reduce_only": reduce_only,
                 "close_position": close_position,
                 "position_side": position_side,
                 "working_type": working_type,
-                "hedge": hedge,
-                "include_conditional": include_conditional,
+                "dry_run": dry_run,
             }
         )
-    )
+    elif action == "cancel_order":
+        call = service.cancel_order(
+            {"order_id": order_id, "symbol": symbol, "dry_run": dry_run}
+        )
+    elif action == "set_leverage":
+        call = service.set_leverage(
+            {"leverage": leverage, "symbol": symbol, "dry_run": dry_run}
+        )
+    elif action == "set_margin_mode":
+        call = service.set_margin_mode(
+            {"margin_mode": margin_mode, "symbol": symbol, "dry_run": dry_run}
+        )
+    else:
+        call = service.set_position_mode({"hedge": hedge, "dry_run": dry_run})
+
+    result = run_service(call, output=output)
     echo_service_result(result, "binance-perp", output)

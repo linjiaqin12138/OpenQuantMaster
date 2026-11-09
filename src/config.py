@@ -1,22 +1,30 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError
 
 
 class BinanceProviderConfig(BaseModel):
+    """``providers.binance`` section of the external configuration."""
+
     api_key: str = Field(default="", alias="apiKey")
     secret: str = ""
+    exchange: str | None = None
+    product: str | None = None
+    sandbox: bool = False
 
 
 class TushareProviderConfig(BaseModel):
+    """``providers.tushare`` section of the external configuration."""
+
     token: str = ""
 
 
 class PushPlusProviderConfig(BaseModel):
+    """``providers.pushplus`` section of the external configuration."""
+
     token: str = ""
     channel: str = "wechat"
     timeout_seconds: float = Field(default=10, gt=0, alias="timeout")
@@ -28,12 +36,9 @@ class ProvidersConfig(BaseModel):
     pushplus: PushPlusProviderConfig = Field(default_factory=PushPlusProviderConfig)
 
 
-class NotificationConfig(BaseModel):
-    provider: Literal["pushplus"] = "pushplus"
-    pushplus: PushPlusProviderConfig = Field(default_factory=PushPlusProviderConfig)
-
-
 class AppConfig(BaseModel):
+    """The application's external configuration format."""
+
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
 
 

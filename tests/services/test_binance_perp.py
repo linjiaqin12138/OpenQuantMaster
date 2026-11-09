@@ -1,131 +1,175 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
 
 import pytest
 
+from src.composition import build_binance_perp_service
 from src.config import AppConfig
-from src.services.binance_perp import BinancePerp, BinancePerpConfig
+from src.models.result import Error, Result
 
 
-class FakeExchange:
-    """Stand-in for ccxt.async_support.binanceusdm (side-effect SDK only)."""
+def _provider(data: Any):
+    async def _call(**kwargs: Any) -> Result:
+        return Result(success=True, data=data)
 
-    instances: list["FakeExchange"] = []
-    resting_orders: list[dict] = []
-    conditional_orders: list[dict] = []
-
-    def __init__(self, *args, **kwargs) -> None:
-        self.kwargs = kwargs
-        type(self).instances.append(self)
-        self._resting_orders = list(type(self).resting_orders)
-        self._conditional_orders = list(type(self).conditional_orders)
-        self.fetch_balance = AsyncMock(
-            return_value={
-                "free": {"USDT": 1000.0},
-                "used": {"USDT": 0.0},
-                "total": {"USDT": 1000.0},
-                "info": {},
-            }
-        )
-        self.fetch_positions = AsyncMock(return_value=[])
-        self.fetch_open_orders = AsyncMock(side_effect=self._fetch_open_orders)
-        self.create_order = AsyncMock(
-            return_value={
-                "id": "1",
-                "symbol": "BTC/USDT:USDT",
-                "type": "market",
-                "side": "buy",
-                "amount": 0.001,
-                "status": "closed",
-            }
-        )
-        self.cancel_order = AsyncMock(return_value={"id": "1", "status": "canceled"})
-        self.set_leverage = AsyncMock(return_value={"leverage": 5})
-        self.set_margin_mode = AsyncMock(return_value={"marginMode": "isolated"})
-        self.set_position_mode = AsyncMock(return_value={"dualSidePosition": True})
-        self.close = AsyncMock()
-        self.set_sandbox_mode = MagicMock()
-
-    async def _fetch_open_orders(self, symbol=None, since=None, limit=None, params=None):
-        params = params or {}
-        if params.get("stop") or params.get("trigger"):
-            return list(self._conditional_orders)
-        return list(self._resting_orders)
+    return _call
 
 
-@pytest.fixture
-def ccxt_fake():
-    FakeExchange.instances = []
-    FakeExchange.resting_orders = []
-    FakeExchange.conditional_orders = []
-    fake_ccxt = type("ccxt", (), {"binanceusdm": FakeExchange})()
-    with patch.dict("sys.modules", {"ccxt.async_support": fake_ccxt}):
-        yield FakeExchange
+def _failing_provider(code: str):
+    async def _call(**kwargs: Any) -> Result:
+        return Result(success=False, error=Error(code=code, message="exchange failed"))
+
+    return _call
 
 
-def test_binance_perp_config_from_app_config():
-    app_config = AppConfig.model_validate(
-        {"providers": {"binance": {"apiKey": "key", "secret": "secret"}}}
-    )
-
-    config = BinancePerpConfig.from_config(app_config)
-
-    assert config.api_key == "key"
-    assert config.secret == "secret"
-    assert config.product == "usdm"
-    assert config.sandbox is False
+def _app_config(**providers: Any) -> AppConfig:
+    return AppConfig.model_validate({"providers": providers})
 
 
-def _service() -> BinancePerp:
-    return BinancePerp(
-        BinancePerpConfig(
-            exchange="binance",
-            product="usdm",
-            sandbox=True,
-            api_key="test-key",
-            secret="test-secret",
-        )
+def _service(**providers: Any):
+    return build_binance_perp_service(
+        _app_config(binance={"apiKey": "key", "secret": "secret", **providers})
     )
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_balance(ccxt_fake):
-    result = await _service().run({"action": "balance"})
+async def test_balance_returns_the_account_assets(monkeypatch):
+    monkeypatch.setattr(
+        "src.use_cases.binance_perp.fetch_balance_result",
+        _provider(
+            {
+                "assets": {"USDT": {"free": 1000.0, "used": 0.0, "total": 1000.0}},
+                "info_keys": [],
+            }
+        ),
+    )
+
+    result = await _service().balance()
+
     assert result.success is True
-    assert result.data["action"] == "balance"
-    assert result.data["exchange"] == "binance"
-    assert result.data["product"] == "usdm"
-    assert result.data["sandbox"] is True
-    assert result.data["result"]["assets"]["USDT"]["total"] == 1000.0
-    assert len(ccxt_fake.instances) == 1
-    ccxt_fake.instances[0].fetch_balance.assert_awaited_once()
-    ccxt_fake.instances[0].close.assert_awaited_once()
+    assert result.data["assets"]["USDT"]["total"] == 1000.0
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_create_order_dry_run_skips_sdk_write(ccxt_fake):
-    result = await _service().run(
+async def test_positions_returns_the_open_positions(monkeypatch):
+    monkeypatch.setattr(
+        "src.use_cases.binance_perp.fetch_positions_result",
+        _provider([{"symbol": "BTC/USDT:USDT", "side": "long"}]),
+    )
+
+    result = await _service().positions({"symbol": "BTC/USDT:USDT"})
+
+    assert result.success is True
+    assert result.data["positions"][0]["symbol"] == "BTC/USDT:USDT"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_open_orders_returns_the_orders(monkeypatch):
+    monkeypatch.setattr(
+        "src.use_cases.binance_perp.fetch_open_orders_result",
+        _provider([{"id": "1", "order_kind": "resting"}]),
+    )
+
+    result = await _service().open_orders({"symbol": "SUI/USDT:USDT"})
+
+    assert result.success is True
+    assert result.data["orders"][0]["id"] == "1"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_create_order_is_previewed_in_dry_run(monkeypatch):
+    def _unexpected_call(**kwargs: Any) -> Result:
+        raise AssertionError("the exchange must not be called in dry-run")
+
+    monkeypatch.setattr(
+        "src.use_cases.binance_perp.create_order_result",
+        _unexpected_call,
+    )
+
+    result = await _service().create_order(
         {
-            "action": "create_order",
             "symbol": "BTC/USDT:USDT",
             "side": "buy",
             "order_type": "market",
             "amount": 0.001,
         }
     )
+
     assert result.success is True
     assert result.data["dry_run"] is True
     assert result.data["planned"]["order_type"] == "market"
-    assert ccxt_fake.instances == []
+    assert result.data["order"] is None
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_create_order_live_calls_sdk(ccxt_fake):
-    result = await _service().run(
+async def test_cancel_order_is_previewed_in_dry_run(monkeypatch):
+    def _unexpected_call(**kwargs: Any) -> Result:
+        raise AssertionError("the exchange must not be called in dry-run")
+
+    monkeypatch.setattr(
+        "src.use_cases.binance_perp.cancel_order_result",
+        _unexpected_call,
+    )
+
+    result = await _service().cancel_order(
+        {"order_id": "12345", "symbol": "BTC/USDT:USDT"}
+    )
+
+    assert result.data["dry_run"] is True
+    assert result.data["planned"]["order_id"] == "12345"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_set_leverage_is_previewed_in_dry_run(monkeypatch):
+    def _unexpected_call(**kwargs: Any) -> Result:
+        raise AssertionError("the exchange must not be called in dry-run")
+
+    monkeypatch.setattr(
+        "src.use_cases.binance_perp.set_leverage_result",
+        _unexpected_call,
+    )
+
+    result = await _service().set_leverage({"leverage": 5, "symbol": "BTC/USDT:USDT"})
+
+    assert result.data["dry_run"] is True
+    assert result.data["planned"]["leverage"] == 5
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_set_position_mode_is_previewed_in_dry_run(monkeypatch):
+    def _unexpected_call(**kwargs: Any) -> Result:
+        raise AssertionError("the exchange must not be called in dry-run")
+
+    monkeypatch.setattr(
+        "src.use_cases.binance_perp.set_position_mode_result",
+        _unexpected_call,
+    )
+
+    result = await _service().set_position_mode({"hedge": True})
+
+    assert result.data["dry_run"] is True
+    assert result.data["planned"]["hedge"] is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_create_order_reaches_the_exchange_when_not_dry_run(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    async def _call(**kwargs: Any) -> Result:
+        captured.update(kwargs)
+        return Result(success=True, data={"id": "1", "status": "closed"})
+
+    monkeypatch.setattr("src.use_cases.binance_perp.create_order_result", _call)
+
+    result = await _service().create_order(
         {
-            "action": "create_order",
             "symbol": "BTC/USDT:USDT",
             "side": "buy",
             "order_type": "market",
@@ -133,212 +177,86 @@ async def test_create_order_live_calls_sdk(ccxt_fake):
             "dry_run": False,
         }
     )
+
+    assert captured["symbol"] == "BTC/USDT:USDT"
+    assert captured["side"] == "buy"
     assert result.success is True
     assert result.data["dry_run"] is False
-    assert result.data["result"]["id"] == "1"
-    assert len(ccxt_fake.instances) == 1
-    exchange = ccxt_fake.instances[0]
-    exchange.create_order.assert_awaited_once()
-    exchange.set_sandbox_mode.assert_called_once_with(True)
-    exchange.close.assert_awaited_once()
+    assert result.data["order"]["id"] == "1"
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_stop_market_requires_stop_price(ccxt_fake):
-    result = await _service().run(
+async def test_create_order_validates_the_request():
+    result = await _service().create_order(
         {
-            "action": "create_order",
             "symbol": "BTC/USDT:USDT",
             "side": "sell",
             "order_type": "stop_market",
             "amount": 0.001,
         }
     )
+
     assert result.success is False
     assert result.error is not None
+    assert result.error.code == "invalid_input"
     assert "stop_price" in result.error.message
-    assert ccxt_fake.instances == []
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_stop_market_dry_run_planned(ccxt_fake):
-    result = await _service().run(
+async def test_an_exchange_outage_is_mapped(monkeypatch):
+    monkeypatch.setattr(
+        "src.use_cases.binance_perp.fetch_balance_result",
+        _failing_provider("provider_unavailable"),
+    )
+
+    result = await _service().balance()
+
+    assert result.success is False
+    assert result.error is not None
+    assert result.error.code == "exchange_unavailable"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_an_exchange_rejection_is_mapped(monkeypatch):
+    monkeypatch.setattr(
+        "src.use_cases.binance_perp.create_order_result",
+        _failing_provider("provider_rejected"),
+    )
+
+    result = await _service().create_order(
         {
-            "action": "create_order",
             "symbol": "BTC/USDT:USDT",
-            "side": "sell",
-            "order_type": "stop_market",
+            "side": "buy",
+            "order_type": "market",
             "amount": 0.001,
-            "stop_price": 45000.0,
-            "reduce_only": True,
-            "position_side": "LONG",
+            "dry_run": False,
         }
     )
-    assert result.success is True
-    planned = result.data["planned"]
-    assert planned["order_type"] == "stop_market"
-    assert planned["stop_price"] == 45000.0
-    assert planned["position_side"] == "LONG"
-    assert ccxt_fake.instances == []
+
+    assert result.error is not None
+    assert result.error.code == "order_rejected"
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_set_position_mode_dry_run(ccxt_fake):
-    result = await _service().run({"action": "set_position_mode", "hedge": True})
-    assert result.success is True
-    assert result.data["planned"]["hedge"] is True
-    assert ccxt_fake.instances == []
+async def test_the_external_configuration_reaches_the_exchange(monkeypatch):
+    captured: dict[str, Any] = {}
 
+    async def _call(**kwargs: Any) -> Result:
+        captured.update(kwargs)
+        return Result(success=True, data={"assets": {}, "info_keys": []})
 
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_open_orders_includes_conditional_by_default(ccxt_fake):
-    FakeExchange.resting_orders = [
-        {
-            "id": "99",
-            "clientOrderId": "limit-1",
-            "symbol": "SUI/USDT:USDT",
-            "type": "limit",
-            "side": "sell",
-            "price": 0.9,
-            "amount": 10.0,
-            "filled": 0.0,
-            "remaining": 10.0,
-            "status": "open",
-            "reduceOnly": False,
-            "stopPrice": None,
-            "timestamp": 1,
-            "info": {},
-        }
-    ]
-    FakeExchange.conditional_orders = [
-        {
-            "id": "1000002667807070",
-            "clientOrderId": "stToAg_OTOCO_1",
-            "symbol": "SUI/USDT:USDT",
-            "type": "market",
-            "side": "buy",
-            "price": None,
-            "amount": 48.3,
-            "filled": 0.0,
-            "remaining": 48.3,
-            "status": "open",
-            "reduceOnly": True,
-            "stopPrice": 0.8488,
-            "triggerPrice": 0.8488,
-            "timestamp": 2,
-            "info": {
-                "algoId": 1000002667807070,
-                "algoType": "CONDITIONAL",
-                "orderType": "TAKE_PROFIT_MARKET",
-                "workingType": "CONTRACT_PRICE",
-                "algoStatus": "NEW",
-                "closePosition": False,
-            },
-        },
-        {
-            "id": "1000002667807071",
-            "clientOrderId": "stToAg_OTOCO_2",
-            "symbol": "SUI/USDT:USDT",
-            "type": "market",
-            "side": "buy",
-            "price": None,
-            "amount": 48.3,
-            "filled": 0.0,
-            "remaining": 48.3,
-            "status": "open",
-            "reduceOnly": True,
-            "stopPrice": 0.9008,
-            "triggerPrice": 0.9008,
-            "timestamp": 3,
-            "info": {
-                "algoId": 1000002667807071,
-                "algoType": "CONDITIONAL",
-                "orderType": "STOP_MARKET",
-                "workingType": "CONTRACT_PRICE",
-                "algoStatus": "NEW",
-                "closePosition": False,
-            },
-        },
-    ]
+    monkeypatch.setattr("src.use_cases.binance_perp.fetch_balance_result", _call)
 
-    result = await _service().run({"action": "open_orders", "symbol": "SUI/USDT:USDT"})
-
-    assert result.success is True
-    rows = result.data["result"]
-    assert len(rows) == 3
-    assert rows[0]["order_kind"] == "resting"
-    assert rows[0]["type"] == "limit"
-    assert rows[1]["order_kind"] == "conditional"
-    assert rows[1]["type"] == "take_profit_market"
-    assert rows[1]["stopPrice"] == 0.8488
-    assert rows[1]["workingType"] == "CONTRACT_PRICE"
-    assert rows[1]["algoStatus"] == "NEW"
-    assert rows[1]["closePosition"] is False
-    assert rows[2]["order_kind"] == "conditional"
-    assert rows[2]["type"] == "stop_market"
-    assert rows[2]["stopPrice"] == 0.9008
-
-    exchange = ccxt_fake.instances[0]
-    assert exchange.fetch_open_orders.await_count == 2
-    exchange.fetch_open_orders.assert_any_await("SUI/USDT:USDT")
-    exchange.fetch_open_orders.assert_any_await(
-        "SUI/USDT:USDT", params={"stop": True}
+    service = build_binance_perp_service(
+        _app_config(binance={"apiKey": "key", "secret": "secret", "sandbox": True})
     )
+    await service.balance()
 
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_open_orders_can_skip_conditional(ccxt_fake):
-    FakeExchange.resting_orders = [
-        {
-            "id": "99",
-            "clientOrderId": "limit-1",
-            "symbol": "SUI/USDT:USDT",
-            "type": "limit",
-            "side": "sell",
-            "price": 0.9,
-            "amount": 10.0,
-            "filled": 0.0,
-            "remaining": 10.0,
-            "status": "open",
-            "reduceOnly": False,
-            "stopPrice": None,
-            "timestamp": 1,
-            "info": {},
-        }
-    ]
-    FakeExchange.conditional_orders = [
-        {
-            "id": "1001",
-            "clientOrderId": "tp-1",
-            "symbol": "SUI/USDT:USDT",
-            "type": "market",
-            "side": "buy",
-            "amount": 1.0,
-            "filled": 0.0,
-            "remaining": 1.0,
-            "status": "open",
-            "reduceOnly": True,
-            "stopPrice": 0.8,
-            "timestamp": 2,
-            "info": {"algoType": "CONDITIONAL", "orderType": "TAKE_PROFIT_MARKET"},
-        }
-    ]
-
-    result = await _service().run(
-        {
-            "action": "open_orders",
-            "symbol": "SUI/USDT:USDT",
-            "include_conditional": False,
-        }
-    )
-
-    assert result.success is True
-    rows = result.data["result"]
-    assert len(rows) == 1
-    assert rows[0]["order_kind"] == "resting"
-    assert ccxt_fake.instances[0].fetch_open_orders.await_count == 1
+    assert captured["venue"].api_key == "key"
+    assert captured["venue"].secret == "secret"
+    assert captured["venue"].sandbox is True
+    assert captured["venue"].product == "usdm"

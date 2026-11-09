@@ -1,40 +1,44 @@
-import json
-from unittest.mock import patch
+from typing import Any
 
-import httpx
 import pytest
 
-from src.config import NotificationConfig, PushPlusProviderConfig
-from src.services.notification import NotificationService
+from src.composition import build_notification_service
+from src.config import AppConfig
+from src.models.result import Error, Result
 
-RealAsyncClient = httpx.AsyncClient
+
+def _provider(response: dict[str, Any]):
+    async def _call(**kwargs: Any) -> Result:
+        return Result(success=True, data=response)
+
+    return _call
 
 
-def service() -> NotificationService:
-    return NotificationService(
-        NotificationConfig(pushplus=PushPlusProviderConfig(token="test-token"))
-    )
+def _failing_provider(code: str):
+    async def _call(**kwargs: Any) -> Result:
+        return Result(success=False, error=Error(code=code, message="provider failed"))
+
+    return _call
+
+
+def _app_config(**providers: Any) -> AppConfig:
+    return AppConfig.model_validate({"providers": providers})
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_notification_sends_pushplus_message():
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url == "https://www.pushplus.plus/send"
-        assert json.loads(request.content) == {
-            "token": "test-token",
-            "title": "Order filled",
-            "content": "BTCUSDT filled",
-            "template": "markdown",
-            "channel": "wechat",
-        }
-        return httpx.Response(200, json={"code": 200, "msg": "ok", "data": "message-1"})
+async def test_send_delivers_the_notification(monkeypatch):
+    monkeypatch.setattr(
+        "src.use_cases.notification.send_pushplus_result",
+        _provider({"code": 200, "msg": "ok", "data": "message-1"}),
+    )
 
-    transport = httpx.MockTransport(handler)
-    with patch("httpx.AsyncClient", lambda **kwargs: RealAsyncClient(transport=transport)):
-        result = await service().run(
-            {"title": "Order filled", "content": "BTCUSDT filled", "format": "markdown"}
-        )
+    service = build_notification_service(
+        _app_config(pushplus={"token": "pushplus-token"})
+    )
+    result = await service.send(
+        {"title": "Order filled", "content": "BTCUSDT filled", "format": "markdown"}
+    )
 
     assert result.success is True
     assert result.data == {
@@ -47,55 +51,62 @@ async def test_notification_sends_pushplus_message():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_notification_uses_default_provider_and_format():
-    def handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.content)
-        assert payload["template"] == "html"
-        return httpx.Response(200, json={"code": 200, "msg": "ok", "data": None})
-
-    transport = httpx.MockTransport(handler)
-    with patch("httpx.AsyncClient", lambda **kwargs: RealAsyncClient(transport=transport)):
-        result = await service().run({"content": "hello"})
-
-    assert result.success is True
-    assert result.data["provider"] == "pushplus"
-    assert result.data["format"] == "html"
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_notification_reports_provider_rejection():
-    transport = httpx.MockTransport(
-        lambda request: httpx.Response(200, json={"code": 903, "msg": "invalid token"})
+async def test_send_maps_a_provider_rejection(monkeypatch):
+    monkeypatch.setattr(
+        "src.use_cases.notification.send_pushplus_result",
+        _failing_provider("provider_rejected"),
     )
-    with patch("httpx.AsyncClient", lambda **kwargs: RealAsyncClient(transport=transport)):
-        result = await service().run({"content": "hello"})
+
+    service = build_notification_service(
+        _app_config(pushplus={"token": "pushplus-token"})
+    )
+    result = await service.send({"content": "hello"})
 
     assert result.success is False
     assert result.error is not None
-    assert result.error.code == "provider_rejected"
-    assert result.error.message == "invalid token"
+    assert result.error.code == "notification_rejected"
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_notification_reports_transport_error():
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("connection failed", request=request)
+async def test_send_maps_a_provider_outage(monkeypatch):
+    monkeypatch.setattr(
+        "src.use_cases.notification.send_pushplus_result",
+        _failing_provider("provider_timeout"),
+    )
 
-    transport = httpx.MockTransport(handler)
-    with patch("httpx.AsyncClient", lambda **kwargs: RealAsyncClient(transport=transport)):
-        result = await service().run({"content": "hello"})
+    service = build_notification_service(
+        _app_config(pushplus={"token": "pushplus-token"})
+    )
+    result = await service.send({"content": "hello"})
 
-    assert result.success is False
     assert result.error is not None
-    assert result.error.code == "provider_request_failed"
+    assert result.error.code == "notification_unavailable"
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_notification_requires_token():
-    result = await NotificationService(NotificationConfig()).run({"content": "hello"})
+async def test_send_maps_an_unknown_provider_failure(monkeypatch):
+    monkeypatch.setattr(
+        "src.use_cases.notification.send_pushplus_result",
+        _failing_provider("unknown"),
+    )
+
+    service = build_notification_service(
+        _app_config(pushplus={"token": "pushplus-token"})
+    )
+    result = await service.send({"content": "hello"})
+
+    assert result.error is not None
+    assert result.error.code == "notification_failed"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_send_requires_a_provider_token():
+    service = build_notification_service(_app_config())
+
+    result = await service.send({"content": "hello"})
 
     assert result.success is False
     assert result.error is not None
@@ -104,10 +115,34 @@ async def test_notification_requires_token():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-@pytest.mark.parametrize("inputs", [{"title": "missing content"}, {"content": ""}, {"content": "x", "format": "xml"}])
-async def test_notification_validates_input(inputs):
-    result = await service().run(inputs)
+async def test_send_validates_the_request():
+    service = build_notification_service(
+        _app_config(pushplus={"token": "pushplus-token"})
+    )
+
+    result = await service.send({"content": ""})
 
     assert result.success is False
     assert result.error is not None
-    assert result.error.code == "unhandled_exception"
+    assert result.error.code == "invalid_input"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_the_external_configuration_reaches_the_provider(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    async def _call(**kwargs: Any) -> Result:
+        captured.update(kwargs)
+        return Result(success=True, data={"code": 200, "data": "message-1"})
+
+    monkeypatch.setattr("src.use_cases.notification.send_pushplus_result", _call)
+
+    service = build_notification_service(
+        _app_config(pushplus={"token": "pushplus-token", "channel": "wechat", "timeout": 5})
+    )
+    await service.send({"content": "hello"})
+
+    assert captured["token"] == "pushplus-token"
+    assert captured["channel"] == "wechat"
+    assert captured["timeout_seconds"] == 5

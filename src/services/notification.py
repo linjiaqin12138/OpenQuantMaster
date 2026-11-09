@@ -1,75 +1,52 @@
 from __future__ import annotations
 
-from typing import Any, ClassVar, Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from src.config import AppConfig, NotificationConfig
-from src.operations.pushplus import send_pushplus
-from src.services.base import BaseService, ServiceResult
+from src.models.result import ServiceResult
+from src.services.base import BaseService
+from src.use_cases.notification import (
+    SendNotificationInput,
+    SendNotificationOutput,
+    SendNotificationUseCase,
+    SendNotificationUseCaseConfig,
+)
 
-NotificationFormat = Literal["html", "txt", "markdown", "json"]
+__all__ = [
+    "NotificationService",
+    "NotificationServiceConfig",
+    "SendNotificationInput",
+    "SendNotificationOutput",
+]
 
 
-class NotificationInput(BaseModel):
-    title: str = ""
-    content: str = Field(..., min_length=1)
-    format: NotificationFormat = "html"
+class NotificationServiceConfig(BaseModel):
+    """Configuration of the notification capability."""
 
-
-class NotificationOutput(BaseModel):
-    provider: str
-    format: NotificationFormat
-    message_id: str | None = None
-    response: dict[str, Any]
+    provider: Literal["pushplus"] = "pushplus"
+    token: str = ""
+    channel: str = "wechat"
+    timeout_seconds: float = 10
 
 
 class NotificationService(BaseService):
-    input_model: ClassVar[type[BaseModel]] = NotificationInput
-    output_model: ClassVar[type[BaseModel]] = NotificationOutput
+    """Notification capability: deliver one message through the configured provider."""
 
-    def __init__(self, cfg: NotificationConfig) -> None:
-        self.cfg = cfg
-
-    @classmethod
-    def from_config(cls, config: AppConfig) -> NotificationService:
-        return cls(NotificationConfig(pushplus=config.providers.pushplus))
-
-    async def _run(self, inputs: NotificationInput) -> ServiceResult:
-        if self.cfg.provider == "pushplus":
-            return await self._send_with_pushplus(inputs)
-        return ServiceResult.from_error(
-            "unsupported_provider",
-            f"Unsupported notification provider: {self.cfg.provider}",
-        )
-
-    async def _send_with_pushplus(self, inputs: NotificationInput) -> ServiceResult:
-        provider = self.cfg.pushplus
-        if not provider.token:
-            return ServiceResult.from_error(
-                "missing_provider_token",
-                "PushPlus token is required",
+    def __init__(self, config: NotificationServiceConfig) -> None:
+        self.config = config
+        self._send = SendNotificationUseCase(
+            SendNotificationUseCaseConfig(
+                provider=config.provider,
+                token=config.token,
+                channel=config.channel,
+                timeout_seconds=config.timeout_seconds,
             )
-        result = await send_pushplus(
-            token=provider.token,
-            title=inputs.title,
-            content=inputs.content,
-            template=inputs.format,
-            channel=provider.channel,
-            timeout_seconds=provider.timeout_seconds,
         )
-        if not result.success:
-            return ServiceResult(
-                success=False,
-                error=result.error,
-            )
 
-        response = result.data
-        message_id = response.get("data")
-        output = self.output_model(
-            provider=self.cfg.provider,
-            format=inputs.format,
-            message_id=str(message_id) if message_id is not None else None,
-            response=response,
-        )
-        return ServiceResult(success=True, data=output.model_dump())
+    async def send(
+        self,
+        request: SendNotificationInput | dict[str, Any],
+    ) -> ServiceResult:
+        """Deliver one notification through the configured provider."""
+        return await self._send.run(request)

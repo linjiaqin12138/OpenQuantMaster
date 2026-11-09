@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import click
 from rich.console import Console
 from rich.table import Table
 
-from src.entry.cli.base import echo_service_result, output_option
+from src.protocols.cli.base import echo_service_result, output_option, run_service
 from src.services.news_fetcher import NewsFetcher
 
 
@@ -15,7 +14,7 @@ def render_news_fetcher(data: dict[str, Any]) -> None:
     console = Console()
     coverage = data["coverage"]
     console.print(
-        f"[bold]NewsFetcher[/bold] {data['mode']} [dim]({data['rows']} rows; "
+        f"[bold]NewsFetcher[/bold] [dim]({data['rows']} rows; "
         f"{coverage['earliest'] or '-'} to {coverage['latest'] or '-'})[/dim]"
     )
     if not data["items"]:
@@ -73,19 +72,21 @@ def news_fetcher(
     output: str,
 ) -> None:
     """Fetch and normalize recent financial news through AkShare."""
-    result = asyncio.run(
-        NewsFetcher().run(
+    service = NewsFetcher()
+    if mode == "stock-recent":
+        call = service.fetch_stock_news({"symbol": symbol, "limit": limit})
+    else:
+        call = service.fetch_recent(
             {
-                "mode": mode.replace("-", "_"),
                 "sources": [value.strip() for value in sources.split(",") if value.strip()]
                 if sources is not None
                 else None,
-                "symbol": symbol,
                 "keywords": [value.strip() for value in keywords.split(",") if value.strip()],
                 "keyword_match": keyword_match,
                 "limit": limit,
                 "deduplicate": not no_deduplicate,
             }
         )
-    )
+
+    result = run_service(call, output=output)
     echo_service_result(result, "news-fetcher", output)

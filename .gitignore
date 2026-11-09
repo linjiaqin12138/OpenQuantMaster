@@ -30,3 +30,7 @@ uv.lock
 
 # Build artifacts
 dist/
+# Test coverage artifacts
+.coverage
+.coverage.*
+htmlcov/

@@ -2,6 +2,9 @@ providers:
   binance:
     apiKey: ""
     secret: ""
+    exchange: ""    # Optional; defaults to binance.
+    product: ""     # Optional; spot or usdm. Defaults to spot for OHLCV, usdm for BinancePerp.
+    sandbox: false  # Optional; sandbox / testnet mode when supported.
   tushare:
     token: ""
   pushplus:

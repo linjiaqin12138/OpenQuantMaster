@@ -1,40 +1,14 @@
 from __future__ import annotations
 
-import time
-from abc import ABC, abstractmethod
-from typing import Any, ClassVar
-
-from pydantic import BaseModel
-
-from src.models.result import Error, OperationResult
-
-ServiceError = Error
-
-
-class ServiceResult(OperationResult):
-    duration_seconds: float = 0.0
+from abc import ABC
 
 
 class BaseService(ABC):
-    """Orchestration unit with explicit Pydantic I/O. No Click; no process lifecycle."""
+    """Public facade of one application capability.
 
-    input_model: ClassVar[type[BaseModel]]
-    output_model: ClassVar[type[BaseModel]]
-
-    async def run(self, inputs: dict[str, Any]) -> ServiceResult:
-        started = time.perf_counter()
-        try:
-            parsed = self.input_model(**inputs)
-            result = await self._run(parsed)
-            if result.success:
-                self.output_model(**result.data)
-        except Exception as exc:
-            result = ServiceResult.from_error("unhandled_exception", str(exc), exc)
-            result.duration_seconds = time.perf_counter() - started
-            return result
-        result.duration_seconds = time.perf_counter() - started
-        return result
-
-    @abstractmethod
-    async def _run(self, inputs: BaseModel) -> ServiceResult:
-        """Subclasses orchestrate operations and/or other services here."""
+    A service groups the UseCases of a capability and exposes them through
+    semantically named methods. It owns the capability configuration and
+    delegates each operation to its UseCase, whose ``run()`` is the standard
+    action boundary: request validation, execution, response validation, and
+    result normalization all live there.
+    """

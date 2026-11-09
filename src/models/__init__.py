@@ -1,3 +1,4 @@
-from src.models.result import Error, OperationResult
+from src.models.bar import Bar
+from src.models.result import AppError, Error, Result, ServiceResult, as_call_result
 
-__all__ = ["Error", "OperationResult"]
+__all__ = ["AppError", "Bar", "Error", "Result", "ServiceResult", "as_call_result"]

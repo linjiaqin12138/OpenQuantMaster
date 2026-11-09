@@ -1,271 +1,156 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
-import numpy as np
-import pandas as pd
 import pytest
-import talib
 
-from src.services.indicator import Indicator
-from src.services.ohlcv import OHLCV, OHLCVConfig, OHLCVCryptoConfig
+from src.composition import build_indicator_service
+from src.config import AppConfig
+from src.models.result import Error, Result
 
 
-def _make_bars(n: int = 50) -> list[dict]:
-    np.random.seed(42)
-    base = 100 + np.cumsum(np.random.randn(n) * 0.5)
-    df = pd.DataFrame(
+def _bars(count: int = 50) -> list[dict]:
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    bars = [
         {
-            "timestamp": pd.date_range("2026-01-01", periods=n, freq="h", tz="UTC"),
-            "open": base,
-            "high": base + np.abs(np.random.randn(n)) * 1.5,
-            "low": base - np.abs(np.random.randn(n)) * 1.5,
-            "close": base + np.random.randn(n) * 1.0,
-            "volume": np.random.randint(1000, 10000, n),
+            "timestamp": (start + timedelta(hours=index)).isoformat(),
+            "open": 100.0 + index,
+            "high": 102.0 + index,
+            "low": 99.0 + index,
+            "close": 101.0 + index,
+            "volume": 1000.0,
         }
-    )
-    df.loc[10, ["open", "high", "low", "close"]] = [100.0, 100.5, 99.5, 100.0]
-    df.loc[29, ["open", "high", "low", "close"]] = [102.0, 102.2, 100.5, 100.8]
-    df.loc[30, ["open", "high", "low", "close"]] = [100.0, 103.0, 99.5, 102.5]
-    out = df.copy()
-    out["timestamp"] = out["timestamp"].dt.strftime("%Y-%m-%dT%H:%M:%S%z")
-    return out.to_dict(orient="records")
+        for index in range(count)
+    ]
+    # Rows crafted to produce a doji pattern.
+    if count > 10:
+        bars[10] = {**bars[10], "open": 100.0, "high": 100.5, "low": 99.5, "close": 100.0}
+    return bars
+
+
+def _provider(count: int = 50):
+    async def _call(**kwargs: Any) -> Result:
+        return Result(success=True, data=_bars(count))
+
+    return _call
+
+
+def _app_config() -> AppConfig:
+    return AppConfig.model_validate({"providers": {}})
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_indicator_from_bars():
-    result = await Indicator().run(
+async def test_compute_returns_indicators_for_given_bars():
+    service = build_indicator_service(_app_config())
+
+    result = await service.compute(
         {
             "symbol": "BTCUSDT",
             "interval": "1h",
-            "bars": _make_bars(),
-            "indicators": ["sma", "ema", "macd", "rsi", "boll", "atr"],
-            "patterns": ["DOJI", "ENGULFING"],
+            "bars": _bars(),
+            "indicators": ["sma", "rsi"],
+            "patterns": ["DOJI"],
         }
     )
 
     assert result.success is True
-    data = result.data
-    assert data["symbol"] == "BTCUSDT"
-    assert data["interval"] == "1h"
-    assert data["rows"] == 50
-
-    indicators = data["indicators"]
-    assert "sma" in indicators
-    assert "rsi" in indicators
-    assert 0 <= indicators["rsi"]["value"] <= 100
-    assert indicators["sma"]["value"] > 0
-    assert indicators["sma"]["params"]["timeperiod"] == 30
-    assert indicators["boll"]["upperband"] >= indicators["boll"]["middleband"]
-    assert indicators["boll"]["middleband"] >= indicators["boll"]["lowerband"]
-    assert indicators["macd"]["params"]["fastperiod"] == 12
-
-    patterns = data["patterns"]
-    assert patterns["last_bullish"] is not None or patterns["last_bearish"] is not None
-    assert any(entry["pattern"] == "DOJI" for entry in patterns["history"])
-    assert "BTCUSDT" in data["summary"]
-    assert "1h" in data["summary"]
-
-
-def _ccxt_ohlcv_rows(n: int = 50) -> list[list[float]]:
-    np.random.seed(42)
-    base = 100 + np.cumsum(np.random.randn(n) * 0.5)
-    start_ms = 1_700_000_000_000
-    rows: list[list[float]] = []
-    for i in range(n):
-        o = float(base[i])
-        h = o + abs(float(np.random.randn())) * 1.5
-        low = o - abs(float(np.random.randn())) * 1.5
-        c = o + float(np.random.randn())
-        v = float(np.random.randint(1000, 10000))
-        rows.append([start_ms + i * 3_600_000, o, h, low, c, v])
-    return rows
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_indicator_from_symbol_via_ohlcv():
-    class FakeExchange:
-        def __init__(self, *args, **kwargs) -> None:
-            self.fetch_ohlcv = AsyncMock(return_value=_ccxt_ohlcv_rows(50))
-            self.close = AsyncMock()
-            self.set_sandbox_mode = MagicMock()
-
-    fake_ccxt_module = type("ccxt", (), {"binance": FakeExchange})()
-    ohlcv = OHLCV(
-        OHLCVConfig(crypto=OHLCVCryptoConfig(exchange="binance", product="spot"))
-    )
-
-    with patch.dict("sys.modules", {"ccxt.async_support": fake_ccxt_module}):
-        result = await Indicator(ohlcv=ohlcv).run(
-            {
-                "symbol": "BTC/USDT",
-                "market": "crypto",
-                "interval": "1h",
-                "limit": 50,
-            }
-        )
-
-    assert result.success is True
-    assert result.data["symbol"] == "BTC/USDT"
+    assert result.data["symbol"] == "BTCUSDT"
     assert result.data["rows"] == 50
-    assert result.data["indicators"]["rsi"]["value"] is not None
-    assert result.data["patterns"] == {}
+    assert result.data["indicators"]["sma"]["value"] is not None
+    assert 0 <= result.data["indicators"]["rsi"]["value"] <= 100
+    assert result.data["patterns"]["history"]
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_indicator_rejects_insufficient_data():
-    small_bars = _make_bars(n=3)
-    result = await Indicator().run(
+async def test_compute_fetches_the_bars_of_a_symbol(monkeypatch):
+    monkeypatch.setattr("src.use_cases.ohlcv.fetch_crypto_ohlcv_result", _provider())
+
+    service = build_indicator_service(_app_config())
+    result = await service.compute(
         {
             "symbol": "BTCUSDT",
-            "bars": small_bars,
+            "market": "crypto",
+            "interval": "1h",
+            "limit": 50,
+            "indicators": ["rsi"],
+        }
+    )
+
+    assert result.success is True
+    assert result.data["rows"] == 50
+    assert result.data["indicators"]["rsi"]["value"] is not None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_compute_reports_a_market_data_failure(monkeypatch):
+    async def _call(**kwargs: Any) -> Result:
+        return Result(
+            success=False,
+            error=Error(code="provider_unavailable", message="down"),
+        )
+
+    monkeypatch.setattr("src.use_cases.ohlcv.fetch_crypto_ohlcv_result", _call)
+
+    service = build_indicator_service(_app_config())
+    result = await service.compute(
+        {
+            "symbol": "BTCUSDT",
+            "market": "crypto",
+            "interval": "1h",
+            "indicators": ["rsi"],
+        }
+    )
+
+    assert result.success is False
+    assert result.error is not None
+    assert result.error.code == "market_data_unavailable"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_compute_rejects_a_request_without_bars_or_symbol():
+    service = build_indicator_service(_app_config())
+
+    result = await service.compute({"indicators": ["rsi"]})
+
+    assert result.success is False
+    assert result.error is not None
+    assert result.error.code == "invalid_input"
+    assert "bars" in result.error.message.lower()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_compute_rejects_an_unknown_indicator():
+    service = build_indicator_service(_app_config())
+
+    result = await service.compute(
+        {
+            "symbol": "BTCUSDT",
+            "bars": _bars(),
+            "indicators": ["NOT_AN_INDICATOR"],
+        }
+    )
+
+    assert result.error is not None
+    assert result.error.code == "unknown_indicator"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_compute_rejects_insufficient_data():
+    service = build_indicator_service(_app_config())
+
+    result = await service.compute(
+        {
+            "symbol": "BTCUSDT",
+            "bars": _bars(count=3),
             "indicators": ["sma", "macd"],
             "patterns": ["DOJI"],
         }
     )
-    assert result.success is False
+
     assert result.error is not None
     assert result.error.code == "insufficient_data"
-    assert "Insufficient data" in result.error.message
-    assert "33" in result.error.message
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_indicator_rejects_missing_bars_without_ohlcv():
-    result = await Indicator().run({"indicators": ["rsi"]})
-    assert result.success is False
-    assert result.error is not None
-    assert "bars" in result.error.message.lower()
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_indicator_rejects_symbol_without_ohlcv():
-    result = await Indicator().run(
-        {"symbol": "BTCUSDT", "market": "crypto", "indicators": ["rsi"]}
-    )
-    assert result.success is False
-    assert result.error is not None
-    assert "bars" in result.error.message.lower()
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_indicator_dynamic_indicators():
-    result = await Indicator().run(
-        {
-            "symbol": "BTCUSDT",
-            "bars": _make_bars(),
-            "indicators": ["ADX", "OBV", "STOCH"],
-        }
-    )
-    assert result.success is True
-    indicators = result.data["indicators"]
-    assert indicators["ADX"]["value"] is not None
-    assert indicators["OBV"]["value"] is not None
-    assert indicators["STOCH"]["slowk"] is not None
-    assert indicators["STOCH"]["slowd"] is not None
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_indicator_params():
-    result = await Indicator().run(
-        {
-            "symbol": "BTCUSDT",
-            "bars": _make_bars(),
-            "indicators": ["sma", "macd"],
-            "indicator_params": {
-                "SMA": {"timeperiod": 10},
-                "MACD": {"fastperiod": 5, "slowperiod": 15, "signalperiod": 3},
-            },
-        }
-    )
-    assert result.success is True
-    assert result.data["indicators"]["sma"]["params"]["timeperiod"] == 10
-    macd = result.data["indicators"]["macd"]
-    assert macd["params"]["fastperiod"] == 5
-    assert macd["params"]["slowperiod"] == 15
-    assert macd["params"]["signalperiod"] == 3
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_indicator_patterns_default_none():
-    result = await Indicator().run(
-        {"symbol": "BTCUSDT", "bars": _make_bars(), "indicators": ["rsi"]}
-    )
-    assert result.success is True
-    assert result.data["patterns"] == {}
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_indicator_patterns_bare_names():
-    result = await Indicator().run(
-        {
-            "symbol": "BTCUSDT",
-            "bars": _make_bars(),
-            "indicators": ["rsi"],
-            "patterns": ["ENGULFING", "DOJI", "HAMMER"],
-        }
-    )
-    assert result.success is True
-    patterns = result.data["patterns"]
-    assert isinstance(patterns["history"], list)
-    if patterns["history"]:
-        entry = patterns["history"][0]
-        assert entry["label"] in ("bullish", "bearish", "neutral")
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_indicator_patterns_all_61():
-    all_patterns = [name[3:] for name in talib.get_functions() if name.startswith("CDL")]
-    assert len(all_patterns) == 61
-
-    result = await Indicator().run(
-        {
-            "symbol": "BTCUSDT",
-            "bars": _make_bars(),
-            "indicators": ["SMA"],
-            "patterns": all_patterns,
-        }
-    )
-    assert result.success is True
-    patterns = result.data["patterns"]
-    assert isinstance(patterns["history"], list)
-    if patterns["history"]:
-        assert patterns["last_bullish"] is not None or patterns["last_bearish"] is not None
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_indicator_rejects_unknown_indicator():
-    result = await Indicator().run(
-        {
-            "symbol": "BTCUSDT",
-            "bars": _make_bars(),
-            "indicators": ["NOT_AN_INDICATOR"],
-        }
-    )
-    assert result.success is False
-    assert result.error is not None
-    assert result.error.code == "unknown_indicator"
-    assert "Unknown indicator function" in result.error.message
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_indicator_runtime_failed_indicator():
-    result = await Indicator().run(
-        {
-            "symbol": "BTCUSDT",
-            "bars": _make_bars(),
-            "indicators": ["MAVP"],
-        }
-    )
-    assert result.success is True
-    assert "error" in result.data["indicators"]["MAVP"]

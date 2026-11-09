@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import traceback
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -10,10 +12,39 @@ from jsonpath_ng.exceptions import JSONPathError
 from jsonpath_ng.ext import parse
 from rich.console import Console
 
-from src.services.base import ServiceResult
+from src.models.result import ServiceResult
 
 RichRenderer = Callable[[dict[str, Any]], None]
 _rich_renderers: dict[str, RichRenderer] = {}
+
+# The CLI owns its own external error specification; service error codes are
+# mapped here and never exposed unchanged.
+_CLI_ERROR_CODES = {
+    "invalid_input": "INVALID_INPUT",
+    "invalid_output": "INVALID_OUTPUT",
+    "unsupported_market": "UNSUPPORTED_MARKET",
+    "unsupported_source": "UNSUPPORTED_SOURCE",
+    "market_data_unavailable": "MARKET_DATA_UNAVAILABLE",
+    "market_data_rejected": "MARKET_DATA_REJECTED",
+    "market_data_failed": "MARKET_DATA_FAILED",
+    "unknown_indicator": "UNKNOWN_INDICATOR",
+    "insufficient_data": "INSUFFICIENT_DATA",
+    "all_sources_failed": "ALL_SOURCES_FAILED",
+    "news_source_failed": "NEWS_SOURCE_FAILED",
+    "news_source_unavailable": "NEWS_SOURCE_UNAVAILABLE",
+    "missing_provider_token": "MISSING_PROVIDER_TOKEN",
+    "unsupported_provider": "UNSUPPORTED_PROVIDER",
+    "notification_rejected": "NOTIFICATION_REJECTED",
+    "notification_unavailable": "NOTIFICATION_UNAVAILABLE",
+    "notification_failed": "NOTIFICATION_FAILED",
+    "unsupported_action": "UNSUPPORTED_ACTION",
+    "order_rejected": "ORDER_REJECTED",
+    "exchange_unavailable": "EXCHANGE_UNAVAILABLE",
+    "exchange_failed": "EXCHANGE_FAILED",
+}
+
+_CLI_FALLBACK_ERROR_CODE = "ACTION_FAILED"
+_CLI_INTERNAL_ERROR_CODE = "INTERNAL_ERROR"
 
 
 @click.group(
@@ -85,6 +116,20 @@ def register_service(command: click.Command, *, renderer: RichRenderer | None = 
         _rich_renderers[command.name] = renderer
 
 
+def run_service(coro: Any, *, output: str = "rich") -> ServiceResult:
+    """Run a service call and turn unexpected failures into a CLI error.
+
+    The protocol is the last boundary for uncaught exceptions, so an
+    unexpected failure is reported as an internal CLI error with its stack
+    trace instead of a raw traceback.
+    """
+    try:
+        return asyncio.run(coro)
+    except Exception as exc:
+        _echo_internal_error(exc, output=output)
+        raise click.exceptions.Exit(1) from exc
+
+
 def echo_service_result(result: ServiceResult, service_name: str, output: str) -> None:
     if not result.success:
         _echo_error(result, output)
@@ -112,10 +157,39 @@ def _echo_json(data: Any, *, error: bool = False) -> None:
 
 def _echo_error(result: ServiceResult, output: str) -> None:
     error = result.error
+    code = _CLI_ERROR_CODES.get(error.code, _CLI_FALLBACK_ERROR_CODE)
     if output == "rich":
-        Console(stderr=True).print(f"[bold red]{error.code}[/bold red]: {error.message}")
+        Console(stderr=True).print(f"[bold red]{code}[/bold red]: {error.message}")
+        if error.exception is not None:
+            Console(stderr=True).print(
+                "".join(traceback.format_exception(error.exception)).rstrip()
+            )
     else:
-        _echo_json({"error": {"code": error.code, "message": error.message}}, error=True)
+        _echo_json(
+            {
+                "error": {
+                    "code": code,
+                    "message": error.message,
+                }
+            },
+            error=True,
+        )
+
+
+def _echo_internal_error(exc: Exception, *, output: str) -> None:
+    if output == "rich":
+        Console(stderr=True).print(f"[bold red]{_CLI_INTERNAL_ERROR_CODE}[/bold red]: {exc}")
+        Console(stderr=True).print("".join(traceback.format_exception(exc)).rstrip())
+    else:
+        _echo_json(
+            {
+                "error": {
+                    "code": _CLI_INTERNAL_ERROR_CODE,
+                    "message": str(exc),
+                }
+            },
+            error=True,
+        )
 
 
 def _evaluate_jsonpath(data: dict[str, Any], expression: str) -> Any:

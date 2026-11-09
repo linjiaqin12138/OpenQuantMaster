@@ -1,6 +1,8 @@
 # OpenQuantMaster
 
-Service-oriented quant building blocks under `src/services/` (`OHLCV`, `Indicator`, `NewsFetcher`, `BinancePerp`, `NotificationService`). Call them as `await Service(cfg).run({...})` → `ServiceResult`.
+Service-oriented quant building blocks under `src/services/` (`OHLCV`, `Indicator`, `NewsFetcher`, `BinancePerp`, `NotificationService`). Each service is a facade with semantically named methods: `await service.fetch_bars({...})` → `ServiceResult`.
+
+The code follows a layered architecture: `src/protocols/` (CLI) → `src/services/` (facade) → `src/use_cases/` (workflow) → `src/providers/` (third-party calls), with shared types in `src/models/`, generic helpers in `src/utils/`, the external configuration format in `src/config.py`, and the composition boundary in `src/composition.py`.
 
 Layering and test style: [`docs/conventions/`](docs/conventions/). Service references: [`docs/services/`](docs/services/).
 
@@ -75,15 +77,17 @@ From the repo root with the venv activated:
 # all tests
 pytest
 
-# services only (current suite)
+# one layer only
 pytest tests/services -q
+pytest tests/providers -q
+pytest tests/protocols -q
 
 # unit marker only
 pytest -m unit
 
 # one file / one test
 pytest tests/services/test_ohlcv.py -q
-pytest tests/services/test_indicator.py::test_indicator_rejects_unknown_indicator -q
+pytest tests/services/test_indicator.py::test_compute_rejects_an_unknown_indicator -q
 ```
 
 `pyproject.toml` sets `pythonpath = ["."]`, so imports like `src.services...` resolve without extra env vars.
@@ -92,10 +96,11 @@ pytest tests/services/test_indicator.py::test_indicator_rejects_unknown_indicato
 
 ```python
 import asyncio
-from src.services.ohlcv import OHLCV, OHLCVConfig
+from src.services.ohlcv import OHLCV, OHLCVServiceConfig
 
 async def main():
-    result = await OHLCV(OHLCVConfig()).run(
+    service = OHLCV(OHLCVServiceConfig())
+    result = await service.fetch_bars(
         {"symbol": "BTCUSDT", "market": "crypto", "interval": "1h", "limit": 10}
     )
     print(result.success, result.error, result.data)
