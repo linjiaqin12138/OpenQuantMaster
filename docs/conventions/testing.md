@@ -2,72 +2,130 @@
 
 ## Goals
 
-Tests should survive internal refactors. Prefer stable **public surfaces** — **Service** APIs (`BaseService.run` with documented Pydantic config / input / output) and external SDK APIs — over private helpers.
+Tests should survive internal refactors and each behavior should have one primary test location. Prefer stable public surfaces—semantically named Service methods, Provider functions, Protocol entrypoints, and external SDK APIs—over private helpers.
 
-## Prefer entrypoints
+The standard application behavior test is:
 
-- Drive behavior through a **Service**: construct with its config (or dependencies), then `await service.run({...})`.
-- **Provider** unit tests may call a single atomic Provider directly when asserting pure logic or one I/O boundary; do not use that shortcut for multi-step workflows (those belong under Service tests).
-- Assert on `Result` or `ServiceResult` (`success`, `data`, `error` as the shared `Error | None` with `code` / `message` / `exception`) and documented output fields. Do not assert on private helpers or internal return types unless they are part of a published contract.
-- Internal modules may be rewritten freely; **entry parameters and output contracts should stay stable**.
+```text
+build the Service through the composition root
+    → call its named method with real Service and UseCase code
+    → patch only the concrete Provider at the external-call boundary
+    → assert the public ServiceResult
+```
 
-## Patching
+Do not create a separate test layer for every code layer. In particular, Service-to-UseCase delegation is normally thin and does not justify a parallel set of UseCase tests, and Composition does not need a standalone test suite duplicating Service scenarios.
 
-- **Default: do not patch.** Prefer real Service and UseCase code paths with fixture inputs.
-- **Concrete Providers may be monkeypatched when testing their callers.** Providers are deliberately thin wrappers around HTTP or other external protocols; their parameters and responses are stable, so they are valid test boundaries. No Provider interface or dependency injection is required solely for testing.
-- **External SDKs and network / process boundaries may also be patched** — e.g. `ccxt`, `yfinance`, `akshare`, HTTP clients — especially when testing an Provider itself.
-- **Do not monkeypatch other internal objects**, such as private methods, internal helpers, validators, or formatters. Reach them through a Service or UseCase entrypoint instead; their structure may change during refactoring.
-- Pure computation needs **no patch**; call it through the public entrypoint or a public function and assert outputs.
+## Test ownership
 
-## What to patch vs not
+| Test location | Owns these behaviors | Does not repeat |
+|---|---|---|
+| `tests/services/` | Complete application actions through real Service and UseCase code: Input/Output validation, workflows, retry/fallback, Provider-to-Service error mapping, and configuration propagation | Provider transport parsing and Protocol formatting |
+| `tests/providers/` | Provider request construction, SDK/HTTP interaction, response parsing, provider-local normalization, and exception-to-Provider-error mapping | UseCase workflows and Service error mapping |
+| `tests/protocols/` | Transport parsing, protocol response rendering, Service-to-Protocol error-code mapping, exit/status behavior, and final unknown-exception handling | Application workflows and Provider behavior |
+| `tests/utils/` | Small, direct tests of reusable helpers and decorators | Application workflows and exhaustive implementation matrices |
+| Repository integration tests | Real queries, constraints, commits, rollbacks, and fixtures against a real test database | Provider or Protocol behavior |
 
-| Layer | Patch? | Instead |
-|-------|--------|---------|
-| Service / UseCase public entrypoint | No | Construct with real config and call its public entrypoint |
-| Provider under test | No | Call the Provider directly and patch its external SDK if needed |
-| Concrete Provider called by a UseCase | Yes | Replace it with a stable fake return value or exception |
-| Internal helpers and private methods | No | Reach them through the public entrypoint |
-| External SDK (`ccxt`, etc.) | Yes, when the test would otherwise hit the network | Fake SDK module / exchange class |
-| Pure logic | No | Assert outputs |
+A Service test may verify configuration propagation because the Service was built from external configuration through Composition. That covers Composition as part of the public behavior test; do not repeat the same scenario in `tests/composition/`.
+
+UseCases remain real components inside Service tests. Do not add routine `tests/use_cases/` suites that repeat Service tests merely to call `UseCase.run()` directly. Add a lower-level test only for a genuinely independent component whose behavior cannot be exercised clearly through its public Service, not as a default layer.
+
+Do not add routine `tests/models/` suites. Validate models and shared Result behavior through the public Service, Provider, or utility boundary that uses them rather than testing data structures in isolation for coverage.
+
+## Utility tests
+
+Keep `tests/utils/` simple. Call public utility functions or decorators directly with representative inputs and assert their outputs or effects. Cover the normal case and only meaningful boundaries such as empty input, invalid values, retry exhaustion, or backoff policy. Utilities should not require Service, Provider, network, database, global configuration, or complex fixtures. Do not mock their internals or reproduce the same cases through multiple application layers.
+
+## Avoid duplicate coverage
+
+Assign each assertion to one owning boundary:
+
+- A Provider test proves that an SDK timeout becomes `provider_timeout`.
+- A Service test proves that `provider_timeout` becomes the documented application error and triggers any application retry/fallback.
+- A Protocol test proves that the application error becomes the external code required by that Protocol's spec.
+
+These are different contracts and are not duplicates. By contrast, testing the same workflow, validation rule, or error mapping once through Service and again directly through UseCase is duplicate coverage.
+
+Keep one representative end-to-end Service scenario when it demonstrates wiring. Do not copy the full UseCase scenario matrix into Service, Composition, and Protocol tests.
+
+## Composition-based Service construction
+
+Build Services under test through the composition root from external configuration whenever a composition path exists:
+
+```python
+app_config = AppConfig.model_validate(external_config_values)
+service = build_application_service(app_config)
+result = await service.execute(valid_request_values)
+```
+
+This exercises the same construction path used by Protocols and proves that external fields reach the correct Service/UseCase Config without testing Composition as an additional behavior layer.
+
+Direct Service construction is acceptable only when no composition path exists or the test specifically concerns a manually assembled variant. Do not bypass Composition merely to simplify test setup.
+
+## Patch strategy
+
+### Service and UseCase code: do not patch
+
+Keep the real Service, its concrete UseCases, composed UseCases, validation, workflows, and error mapping. Do not inject or mock a UseCase merely to test a Service. The standard `UseCase.run()` boundary is exercised through the Service's named methods.
+
+### Concrete Providers: patch when testing application behavior
+
+Service tests may monkeypatch the concrete Provider functions called by their UseCases. Providers are deliberate, thin, stable external-call boundaries with documented parameters and normalized results, so no Provider interface or dependency injection is required for testing.
+
+Patch the Provider at its point of use so the real workflow receives the fake:
+
+```python
+monkeypatch.setattr(
+    "src.use_cases.example.call_remote_api_result",
+    fake_call_remote_api_result,
+)
+```
+
+A fake Provider returns the Provider's documented `Result` and provider-level data, including provider-local normalization. It must not return a Service Output model or a Protocol response.
+
+Use Provider fakes for success values and classified Provider failures, including `unknown`, to exercise application retry, fallback, default branches, and error mapping.
+
+### SDK and transport: patch when testing Providers
+
+Provider tests call the real Provider and patch its external SDK, HTTP client, network, or process boundary. Verify request arguments, raw response parsing, normalization, and exception mapping there rather than repeating those assertions in Service tests.
+
+### Internal helpers: do not patch
+
+Do not patch private Service/UseCase methods, internal validators, response shapers, or other implementation helpers. Reach them through the public Service or Provider boundary so internal refactors do not break tests unnecessarily.
+
+### Repositories and persistence: use a real test database
+
+Do not mock Repositories, database sessions, or their results in application workflow tests. Use a real test database with fixtures or factories and exercise actual queries, constraints, commits, and rollbacks. Isolate each test with its own database/schema or reliable cleanup. Use the production database engine for engine-specific transaction, locking, and concurrency behavior.
+
+Pure computation needs no patch; call it through its public boundary and assert outputs.
+
+## Example: Service behavior with a patched Provider
+
+```python
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_execute_maps_provider_failure(app_config, monkeypatch):
+    async def fail_call(**kwargs):
+        return Result(
+            success=False,
+            error=Error(code="provider_unavailable", message="down"),
+        )
+
+    monkeypatch.setattr(
+        "src.use_cases.example.call_remote_api_result",
+        fail_call,
+    )
+    service = build_application_service(app_config)
+
+    result = await service.execute({"value": "example"})
+
+    assert result.success is False
+    assert result.error is not None
+    assert result.error.code == "action_unavailable"
+```
+
+The same suite may place a successful fake Provider at that boundary and assert normalized `ServiceResult.data`. Provider-specific HTTP request and response details belong in `tests/providers/`, not here.
 
 ## Markers
 
-- `@pytest.mark.unit` — fast, no real network; SDK may be faked.
-- `@pytest.mark.integration` — broader wiring when present; still avoid live exchange calls unless explicitly intended.
-
-## Example shape (service + side-effect SDK)
-
-```python
-from unittest.mock import AsyncMock, patch
-
-import pytest
-
-from src.services.binance_perp import BinancePerp, BinancePerpConfig
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_binance_perp_balance():
-    class FakeExchange:
-        def __init__(self, *a, **k):
-            self.fetch_balance = AsyncMock(
-                return_value={"free": {"USDT": 1000.0}, "used": {"USDT": 0.0}, "total": {"USDT": 1000.0}, "info": {}}
-            )
-            self.close = AsyncMock()
-            self.set_sandbox_mode = AsyncMock()
-
-    fake_ccxt = type("ccxt", (), {"binanceusdm": FakeExchange})()
-    svc = BinancePerp(BinancePerpConfig(exchange="binance", product="usdm", sandbox=True))
-
-    with patch.dict("sys.modules", {"ccxt.async_support": fake_ccxt}):
-        result = await svc.run({"action": "balance"})
-
-    assert result.success is True
-    assert result.data["result"]["assets"]["USDT"]["total"] == 1000.0
-```
-
-Notes:
-
-- Construct the service with a real `*Config` model (no patching of our config types).
-- Only `ccxt.async_support` is replaced — that is the side-effect SDK.
-- Validation, dry_run policy, response trimming, etc. all run for real through `Service.run`.
+- `@pytest.mark.unit` — fast, no real network; Providers or SDKs may be faked.
+- `@pytest.mark.integration` — broader wiring or real test persistence; avoid live external services unless explicitly intended.

@@ -2,6 +2,10 @@
 
 Sends notifications through a configured provider. PushPlus is currently supported and is the default provider.
 
+## Method
+
+`await service.send(request)` — one operation, one UseCase (`SendNotificationUseCase`).
+
 ## Configuration
 
 ```yaml
@@ -12,9 +16,11 @@ providers:
     timeout: 10      # Optional; defaults to 10 seconds.
 ```
 
-Only `providers.pushplus.token` must be configured. `channel` and `timeout` are optional. For direct construction, `NotificationConfig` contains `provider` (default `pushplus`) and `pushplus` provider settings. Construct from application configuration with `NotificationService.from_config(app_config)`, or pass `NotificationConfig` directly.
+Only `providers.pushplus.token` must be configured. `channel` and `timeout` are optional. For direct construction, `NotificationServiceConfig` holds `provider` (default `pushplus`), `token`, `channel`, and `timeout_seconds`; the service converts it into the config of its UseCase (`SendNotificationUseCaseConfig`). The composition boundary builds the service config from the external configuration: `build_notification_service(app_config)`.
 
-## Input
+## Request (`SendNotificationInput`)
+
+The request and response models belong to the UseCase that owns the action; the service re-exports them as part of its public facade.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -22,7 +28,7 @@ Only `providers.pushplus.token` must be configured. `channel` and `timeout` are 
 | `content` | non-empty string | Yes | Notification body |
 | `format` | `html`, `txt`, `markdown`, or `json` | No | Content format; defaults to `html` and maps to PushPlus `template` |
 
-## Output
+## Response (`SendNotificationOutput`)
 
 Successful `ServiceResult.data` contains:
 
@@ -31,18 +37,24 @@ Successful `ServiceResult.data` contains:
 - `message_id`: PushPlus response `data`, converted to a string when present.
 - `response`: complete PushPlus JSON response.
 
-Failures use `missing_provider_token` when no token is configured, `provider_rejected` for a PushPlus application error, `provider_request_failed` for HTTP transport errors, and `invalid_provider_response` for malformed response data. Input validation failures use the standard `unhandled_exception` error from `BaseService`.
+## Errors
+
+| Code | Meaning |
+|------|---------|
+| `invalid_input` | The request does not satisfy `SendNotificationInput` |
+| `missing_provider_token` | No PushPlus token is configured |
+| `unsupported_provider` | The configured provider is not supported |
+| `notification_rejected` | PushPlus rejected the message or the credentials |
+| `notification_unavailable` | The provider timed out, is unreachable, or rate-limited |
+| `notification_failed` | Any other provider failure |
 
 ## Example
 
 ```python
-from src.config import NotificationConfig, PushPlusProviderConfig
-from src.services.notification import NotificationService
+from src.services.notification import NotificationService, NotificationServiceConfig
 
-service = NotificationService(
-    NotificationConfig(pushplus=PushPlusProviderConfig(token="your-token"))
-)
-result = await service.run(
+service = NotificationService(NotificationServiceConfig(token="your-token"))
+result = await service.send(
     {"title": "Order filled", "content": "BTCUSDT filled", "format": "markdown"}
 )
 ```

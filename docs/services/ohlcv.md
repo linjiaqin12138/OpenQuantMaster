@@ -2,24 +2,30 @@
 
 Fetch OHLCV bars for crypto, US/HK equities, or A-shares. Returns rows in `data.bars` (no artifacts).
 
-## Config (`OHLCVConfig`)
+## Method
+
+`await service.fetch_bars(request)` — one operation, one UseCase (`FetchBarsUseCase`).
+
+## Config (`OHLCVServiceConfig`)
 
 Injected at construction: `OHLCV(cfg)`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `crypto.exchange` | str | `binance` | Logical exchange name |
-| `crypto.product` | `spot` \| `usdm` | `spot` | Product on that exchange |
-| `crypto.sandbox` | bool | `false` | Sandbox / testnet when supported |
-| `crypto.api_key` | str | `""` | Optional API key |
-| `crypto.secret` | str | `""` | Optional API secret |
+| `exchange` | str | `binance` | Logical exchange name |
+| `product` | `spot` \| `usdm` | `spot` | Product on that exchange |
+| `sandbox` | bool | `false` | Sandbox / testnet when supported |
+| `api_key` | str | `""` | Optional API key |
+| `secret` | str | `""` | Optional API secret |
 | `tushare_token` | str | `""` | Used for A-share when present |
 
-Provider adapters (e.g. CCXT class ids) stay inside the service; callers only use exchange/product.
+The service converts its own config into the config of its UseCase (`FetchBarsUseCaseConfig`, owned by `use_cases/ohlcv.py`). Provider adapters (e.g. CCXT class ids) stay inside the provider; callers only use exchange/product.
 
-Use `OHLCVConfig.from_config(AppConfig)` to construct the service config from the global provider configuration. The service extracts Binance credentials and the Tushare token itself.
+The composition boundary reads the external configuration and constructs the service config: `build_ohlcv_service(app_config)`.
 
-## Input (`OHLCVInput`)
+## Request (`FetchBarsInput`)
+
+The request and response models belong to the UseCase that owns the action; the service re-exports them as part of its public facade.
 
 | Field | Required | Description |
 |-------|----------|-------------|
@@ -32,28 +38,38 @@ Use `OHLCVConfig.from_config(AppConfig)` to construct the service config from th
 
 Selection:
 
-- `crypto` (or `source=ccxt`) → crypto config venue
-- `us_equity` / `hk_equity` (or `source=yfinance`) → yfinance
-- `a_share` → tushare when token set, else akshare
+- `crypto` → CCXT
+- `us_equity` / `hk_equity` → yfinance
+- `a_share` → Tushare when a token is set, else AkShare; a Tushare failure falls back to AkShare unless `source=tushare` is explicit
+- an explicit `source` must match the market, otherwise the request fails with `unsupported_source`
 
-## Output (`OHLCVOutput` in `ServiceResult.data`)
+## Response (`FetchBarsOutput` in `ServiceResult.data`)
 
 | Field | Description |
 |-------|-------------|
 | `symbol` / `market` / `interval` | Echo of request |
 | `rows` | Number of bars |
-| `bars` | List of `{timestamp, open, high, low, close, volume}` |
+| `bars` | List of `{timestamp, open, high, low, close, volume}`; `timestamp` is an ISO-8601 UTC string |
+
+## Errors
+
+| Code | Meaning |
+|------|---------|
+| `invalid_input` | The request does not satisfy `FetchBarsInput` |
+| `unsupported_source` | The requested source does not serve the requested market |
+| `market_data_unavailable` | The provider timed out, is unreachable, or rate-limited |
+| `market_data_rejected` | The provider rejected the request or the credentials |
+| `market_data_failed` | Any other provider failure |
 
 ## Example
 
 ```python
-from src.services.ohlcv import OHLCV, OHLCVConfig, OHLCVCryptoConfig
+from src.services.ohlcv import OHLCV, OHLCVServiceConfig
 
-svc = OHLCV(OHLCVConfig(crypto=OHLCVCryptoConfig(exchange="binance", product="spot")))
-result = await svc.run(
+svc = OHLCV(OHLCVServiceConfig(exchange="binance", product="spot"))
+result = await svc.fetch_bars(
     {"symbol": "BTCUSDT", "market": "crypto", "interval": "1h", "limit": 100}
 )
 assert result.success
 bars = result.data["bars"]
 ```
-
