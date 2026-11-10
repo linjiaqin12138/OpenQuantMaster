@@ -22,6 +22,7 @@ Do not create a separate test layer for every code layer. In particular, Service
 | `tests/services/` | Complete application actions through real Service and UseCase code: Input/Output validation, workflows, retry/fallback, Provider-to-Service error mapping, and configuration propagation | Provider transport parsing and Protocol formatting |
 | `tests/providers/` | Provider request construction, SDK/HTTP interaction, response parsing, provider-local normalization, and exception-to-Provider-error mapping | UseCase workflows and Service error mapping |
 | `tests/protocols/` | Transport parsing, protocol response rendering, Service-to-Protocol error-code mapping, exit/status behavior, and final unknown-exception handling | Application workflows and Provider behavior |
+| `tests/engines/` | Optional: the Engine's own behavior — loop control, tool dispatch, matching rules, metrics, and engine-to-provider error mapping | Application scenarios that belong to `tests/services/` |
 | `tests/utils/` | Small, direct tests of reusable helpers and decorators | Application workflows and exhaustive implementation matrices |
 | Repository integration tests | Real queries, constraints, commits, rollbacks, and fixtures against a real test database | Provider or Protocol behavior |
 
@@ -46,6 +47,8 @@ Assign each assertion to one owning boundary:
 These are different contracts and are not duplicates. By contrast, testing the same workflow, validation rule, or error mapping once through Service and again directly through UseCase is duplicate coverage.
 
 Keep one representative end-to-end Service scenario when it demonstrates wiring. Do not copy the full UseCase scenario matrix into Service, Composition, and Protocol tests.
+
+An Engine is faked at its public facade when a UseCase that drives it is under test, and it is tested on its own terms in `tests/engines/`. Do not add an Engine suite that repeats the application scenarios already covered in `tests/services/`.
 
 ## Composition-based Service construction
 

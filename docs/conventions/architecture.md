@@ -6,7 +6,10 @@ This document defines a lightweight layered architecture. Do not introduce Ports
 
 ```text
 Protocol → Service → UseCase → Provider / Repository / Port
+                                   ↘ Engine → Provider / Repository
 ```
+
+An Engine is an optional peer of Provider and Repository: the application drives it, and it may use providers and repositories internally. It is never a utility and never a UseCase; see **Engine**.
 
 ```mermaid
 flowchart TD
@@ -29,6 +32,10 @@ flowchart TD
 
     subgraph Repositories["Repository / 数据库持久化"]
         DatabaseRepository["数据库 Repository<br/>接收 session，不 commit"]
+    end
+
+    subgraph Engines["Engine / 可独立发布的子系统"]
+        Engine["Engine<br/>agent loop / backtest engine<br/>无 domain knowledge"]
     end
 
     subgraph OptionalPorts["Port / 仅在需要替换时引入"]
@@ -61,6 +68,10 @@ flowchart TD
     UseCase --> ProviderCall
     UseCase --> DatabaseRepository
 
+    UseCase --> Engine
+    Engine --> ProviderCall
+    Engine --> DatabaseRepository
+
     UseCase --> Router
     Router --> Port
     Port --> AdapterA
@@ -85,6 +96,7 @@ flowchart TD
     Result -->|"错误码映射、重试或 fallback"| UseCase
     UseCase -->|"ServiceResult"| Service
     Service -->|"Service error code 映射"| Protocol
+    Engine -->|"EngineResult"| UseCase
 
     UseCase -. "远程调用尽量放在数据库事务之外" .-> ProviderCall
 ```
@@ -102,6 +114,7 @@ project_root/
 │   ├── use_cases/          # 单次应用操作及业务流程编排
 │   ├── providers/          # 无状态第三方远程调用（HTTP、API、SDK）
 │   ├── repositories/       # 数据库读写；接收 session，不 commit
+│   ├── engines/            # 可选：可独立发布的子系统（agent loop、回测引擎等）
 │   ├── ports/              # 可选：需要替换的外部能力接口
 │   ├── adapters/           # 可选：Port 的具体实现与 Provider 适配
 │   ├── models/             # Result、Error 和跨层共享的核心领域数据结构
@@ -111,7 +124,8 @@ project_root/
     ├── services/             # Composition 装配真实 Service，patch Provider
     ├── providers/
     ├── protocols/
-    └── repositories/
+    ├── repositories/
+    └── engines/              # 可选：Engine 自身的循环、撮合、指标等行为
 ```
 
 The names `entrypoints` and `interfaces` may replace `protocols` when they better describe the application. The dependency rules matter more than the directory names.
@@ -156,6 +170,7 @@ Use `src/utils/` for small, reusable, domain-agnostic functions and decorators: 
 - `utils/` must not import Services, UseCases, Providers, Repositories, or domain models. It sits below all application layers.
 - Name modules by capability, for example `utils/retry.py` or `utils/time.py`; do not create a catch-all `common.py`.
 - Keep a helper next to its only caller while it is provider- or domain-specific. Promote it to `utils/` only when it is generic and actually reused.
+- Do not place a subsystem here. A component that could be published as a standalone SDK, carries no domain knowledge, and owns its own lifecycle is an Engine; see **Engine**. A stateful, domain-agnostic component in `utils/` hides a whole system behind a helper directory.
 
 ## Protocol
 
@@ -463,6 +478,73 @@ Tests that need persistent state are integration tests, even when they use an in
 
 Isolate each test with its own database/schema or reliable cleanup. Do not rely only on an outer rollback transaction around the code under test, because that can hide incorrect commit and nested-transaction behavior. For transaction isolation, locking, and concurrency behavior, use the same database engine as production: SQLite-only tests cannot demonstrate production row-locking or isolation semantics.
 
+## Engine
+
+An Engine is a self-contained subsystem that the application drives: an agent loop, a backtest engine, a simulation harness, a scheduler runtime. It is **not** a utility and **not** a UseCase.
+
+### Recognizing an Engine
+
+A component is an Engine when all of the following hold:
+
+- **It could be published as a standalone SDK.** It carries its own public API, its own version, and its own tests, and it makes sense outside this repository.
+- **It contains no knowledge of this project's domain.** It does not know what a symbol, an order, a position, or a notification means. Domain vocabulary stays in UseCases, Services, and models.
+- **It does not depend on the core domain models.** It defines its own input and output types; the caller translates between the Engine's types and the application's types.
+- **It may depend on `providers/`, `utils/`, and other generic infrastructure.** Those dependencies are part of its public contract, not a violation of layering.
+
+The decision rule:
+
+```text
+Knows the domain?            → UseCase (or Service)
+Stateless, side-effect-free? → utils/
+Domain-agnostic but stateful
+and substantial enough to own
+its own lifecycle?           → Engine
+```
+
+An Engine is therefore never placed in `utils/`. Utilities are small, generic, stateless helpers; an Engine is a subsystem with its own models, configuration, lifecycle, and failure modes. Putting an Engine in `utils/` hides a whole system behind a helper-function directory.
+
+### Placement
+
+```text
+src/
+└── engines/
+    ├── agent_loop/
+    │   ├── __init__.py       # 只导出门面
+    │   ├── engine.py         # AgentLoopEngine：run(request) -> EngineResult
+    │   ├── models.py         # 引擎自己的输入/输出与运行期模型
+    │   ├── policy.py         # 循环控制：何时停止、何时重试、工具选择
+    │   └── providers/        # 该引擎专用的第三方调用
+    └── backtest/
+        ├── engine.py         # BacktestEngine：run(config) -> BacktestReport
+        ├── models.py
+        ├── matching.py       # 撮合规则
+        ├── metrics.py        # 绩效指标
+        └── providers/        # 行情、资金费率等数据源
+```
+
+Rules:
+
+- `engines/` is optional. Create it only when the recognition criteria above are met. Otherwise the component belongs in `use_cases/`, `providers/`, or `utils/`.
+- An Engine is a peer of Provider and Repository in dependency depth: it may depend on `providers/`, `repositories/`, `utils/`, and its own models. It must not depend on `protocols/`, `services/`, or `use_cases/`. The application reaches an Engine through a Service or a UseCase; the Engine never calls back into the application.
+- Export exactly one facade per Engine. Callers import the facade, never the internal modules, so the internals stay replaceable.
+- Provider calls used by only one Engine live inside that Engine's own `providers/` directory. Calls shared by several components belong in the top-level `providers/`.
+
+### Side effects and lifecycle
+
+- Side effects stay at the Provider boundary. The Engine's core logic — loop control, tool dispatch, matching, metrics — stays pure or takes its dependencies as parameters, so it can be tested without a network or a database.
+- The Engine owns the clients and sessions it uses, receives them through its configuration, and closes them. A module-level global client is not allowed.
+- The running mode is explicit configuration: an agent loop distinguishes dry-run, sandbox, and live; a backtest engine distinguishes live data, synthetic data, and replay.
+- Randomness that affects results is an explicit input. The Engine must not seed a global random generator, because that leaks into the rest of the process.
+- Retry policy inside an Engine's own loop belongs to the Engine. Retry and fallback across several Engines belong to the UseCase that orchestrates them.
+- The Engine returns results. Persisting them is the caller's decision, through a Repository.
+- The Engine reports its own cost and duration: token usage and spend for an agent loop, orders and turnover for a backtest.
+
+### Engine tests
+
+`tests/engines/` owns the Engine's own behavior: loop control, tool dispatch, matching rules, metrics, and the mapping between engine-level and provider-level errors. It patches the Engine's Providers the same way Service tests patch application Providers.
+
+An Engine does not get a separate suite that repeats the application scenarios in `tests/services/`. A UseCase that drives an Engine is tested at the UseCase level with the Engine faked at its public facade.
+
 ## Result, ServiceResult, and error conversion
 
 Provider and Service errors are different contracts even when they use the same generic Result container:
@@ -731,4 +813,4 @@ Service behavior tests build real Services through Composition and patch concret
 
 ## Summary
 
-Services group related application operations behind semantically named methods and own dependencies; they do not expose a generic `run()` or act as single-UseCase wrappers. UseCases own one complete action each behind standard `run()` methods and own their Config, Input, and Output models; Services import these operation models rather than redefining them. UseCases also own application workflows, request-specific and cross-provider shaping, retry/fallback policies, and transactions; independent operations must not be combined through an `action` dispatcher. Providers live in `providers/`, perform stateless third-party calls, remain patchable concrete functions, and may own lightweight provider-local normalization without depending on application models. Provider Results classify failures incrementally from `unknown`; UseCases map Provider codes to Service codes, and Protocols independently map Service codes to their external specifications. Repositories live in `repositories/`, accept the current session, never commit, and may return ORM entities or domain models directly. Repository workflow tests use a real test database with fixture data rather than mocks. Generic side-effect-free helpers live in `utils/`. Error codes, not provider-specific exception hierarchies, are the cross-layer classification contract. Ports and other optional extensions are introduced only when concrete requirements provide value.
+Services group related application operations behind semantically named methods and own dependencies; they do not expose a generic `run()` or act as single-UseCase wrappers. UseCases own one complete action each behind standard `run()` methods and own their Config, Input, and Output models; Services import these operation models rather than redefining them. UseCases also own application workflows, request-specific and cross-provider shaping, retry/fallback policies, and transactions; independent operations must not be combined through an `action` dispatcher. Providers live in `providers/`, perform stateless third-party calls, remain patchable concrete functions, and may own lightweight provider-local normalization without depending on application models. Provider Results classify failures incrementally from `unknown`; UseCases map Provider codes to Service codes, and Protocols independently map Service codes to their external specifications. Repositories live in `repositories/`, accept the current session, never commit, and may return ORM entities or domain models directly. Repository workflow tests use a real test database with fixture data rather than mocks. Engines live in `engines/`: they are domain-agnostic, independently publishable subsystems with their own models, configuration, and lifecycle; they may use providers, repositories, and utilities, they are never utilities and never UseCases, and the application reaches them through a Service or a UseCase. Generic side-effect-free helpers live in `utils/`. Error codes, not provider-specific exception hierarchies, are the cross-layer classification contract. Ports and other optional extensions are introduced only when concrete requirements provide value.
