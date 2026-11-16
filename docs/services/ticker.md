@@ -1,6 +1,6 @@
 # Ticker
 
-Fetch the latest point-in-time snapshot for an A-share stock, index, listed ETF, or crypto symbol. This complements OHLCV history; it is not a streaming subscription or an exchange-grade real-time feed.
+Fetch the latest completed session for an A-share stock, index, or listed ETF, and the latest snapshot for a crypto symbol. This complements OHLCV history; it is not a streaming subscription or an exchange-grade real-time feed.
 
 ## Method
 
@@ -35,7 +35,9 @@ A code prefix never decides the exchange on its own: `9` covers both the Shangha
 1. Every plausible exchange for the code is queried, ordered by prefix likelihood (`5`/`6` Shanghai first, `4`/`8`/`9` Beijing first, otherwise Shenzhen first).
 2. Exactly one listing must answer. That listing is returned, and `symbol` reports the resolved code, for example `000300` resolves to `000300.SH`.
 3. Two listings answering the same code is an ambiguity, not a guess: the request fails with `ambiguous_symbol` and names both candidates, for example `000001.SZ` (平安银行) and `000001.SH` (上证指数). Callers resolve it by sending the explicit suffix.
-4. No listing answering is `market_data_failed`. Some instruments, such as Beijing-listed codes, are not covered by the quote source and therefore report as not found.
+4. No listing answering is `market_data_failed`. A code the matching Pro daily interface does not list reports as not found.
+
+A-share prices come from Tushare Pro, not from a crawled quote page. The interface follows the code: stocks use `daily`, Shanghai `000*` and Shenzhen `399*` indices use `index_daily`, and listed ETFs (`51`/`56`/`58` on SH, `15`/`16` on SZ) use `fund_daily`. Each call asks for the last 60 calendar days and keeps the newest bar. `price` is that bar's close, and `quote_time` is the session close at 15:00 Asia/Shanghai. During the trading day, before Pro publishes the current session, the bar is still the previous session. `bid` and `ask` stay `null`. A missing `fund_daily` permission is `market_data_rejected`, not a missing symbol. The instrument name comes from `stock_basic`, `index_basic`, or `fund_basic`; a failed name lookup leaves `name` empty and still returns the bar.
 
 Supplying the explicit suffix costs one provider call instead of two or three and removes the ambiguity risk, so it is the preferred form.
 
@@ -53,7 +55,7 @@ Crypto symbols use the configured venue. A perpetual symbol such as `BTC/USDT:US
 | `open` / `high` / `low` | Session prices, or `null` when unavailable |
 | `change` / `change_percent` | Absolute and percentage change, or `null` when unavailable |
 | `bid` / `ask` | Best bid and ask, `null` for sources that do not report them |
-| `quote_time` | Provider quote timestamp as an ISO-8601 UTC string, `null` when the venue reports no timestamp |
+| `quote_time` | Provider quote timestamp as an ISO-8601 UTC string. For A-shares this is the session close (15:00 Asia/Shanghai), `null` when the venue reports no timestamp |
 | `fetched_at` | Local fetch timestamp as an ISO-8601 UTC string |
 
 `quote_time` and `fetched_at` have different meanings. Callers must use `quote_time` when assessing quote freshness and must not describe `fetched_at` as the exchange quote time.

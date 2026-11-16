@@ -66,41 +66,96 @@ async def test_fetch_a_share_ohlcv_forwards_the_requested_window():
     assert kwargs["end_date"] == "20260201"
 
 
+def _pro(frame: pd.DataFrame, *, name: str = "贵州茅台") -> MagicMock:
+    fake_pro = MagicMock()
+    fake_pro.daily.return_value = frame
+    fake_pro.index_daily.return_value = frame
+    fake_pro.fund_daily.return_value = frame
+    fake_pro.stock_basic.return_value = pd.DataFrame({"ts_code": ["600519.SH"], "name": [name]})
+    fake_pro.index_basic.return_value = pd.DataFrame({"ts_code": ["000001.SH"], "name": [name]})
+    fake_pro.fund_basic.return_value = pd.DataFrame({"ts_code": ["515070.SH"], "name": [name]})
+    return fake_pro
+
+
+def _daily_frame(**overrides: object) -> pd.DataFrame:
+    row = {
+        "ts_code": "600519.SH",
+        "trade_date": "20261109",
+        "open": 1440.0,
+        "high": 1449.99,
+        "low": 1435.08,
+        "close": 1444.05,
+        "pre_close": 1453.0,
+    }
+    row.update(overrides)
+    return pd.DataFrame({key: [value] for key, value in row.items()})
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_fetch_a_share_ticker_normalizes_the_snapshot_and_quote_time():
-    fake_frame = pd.DataFrame(
-        {
-            "TS_CODE": ["600519.SH"],
-            "NAME": ["贵州茅台"],
-            "OPEN": [1440.0],
-            "PRE_CLOSE": [1453.0],
-            "PRICE": [1444.05],
-            "HIGH": [1449.99],
-            "LOW": [1435.08],
-            "DATE": ["20261109"],
-            "TIME": ["14:30:00"],
-        }
-    )
+async def test_fetch_a_share_ticker_reads_the_latest_pro_daily_bar():
+    fake_pro = _pro(_daily_frame())
 
-    with patch("tushare.realtime_quote", return_value=fake_frame) as realtime_quote:
+    with patch("tushare.pro_api", return_value=fake_pro) as pro_api:
         ticker = await fetch_a_share_ticker(token="token", symbol="600519.SH")
 
-    realtime_quote.assert_called_once_with(ts_code="600519.SH", src="sina")
+    pro_api.assert_called_once_with("token")
+    assert fake_pro.daily.call_args.kwargs["ts_code"] == "600519.SH"
+    assert len(fake_pro.daily.call_args.kwargs["start_date"]) == 8
+    fake_pro.index_daily.assert_not_called()
+    assert fake_pro.stock_basic.call_args.kwargs["ts_code"] == "600519.SH"
     assert ticker["name"] == "贵州茅台"
     assert ticker["price"] == 1444.05
     assert ticker["previous_close"] == 1453.0
     assert ticker["change"] == pytest.approx(-8.95)
     assert ticker["change_percent"] == pytest.approx(-8.95 / 1453.0 * 100)
-    assert ticker["quote_time"] == "2026-11-09T06:30:00Z"
+    assert ticker["quote_time"] == "2026-11-09T07:00:00Z"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_fetch_a_share_ticker_keeps_the_newest_daily_bar():
+    fake_pro = _pro(
+        pd.DataFrame(
+            {
+                "ts_code": ["600519.SH", "600519.SH"],
+                "trade_date": ["20261106", "20261109"],
+                "open": [1.0, 1440.0],
+                "high": [1.0, 1449.99],
+                "low": [1.0, 1435.08],
+                "close": [1.0, 1444.05],
+                "pre_close": [1.0, 1453.0],
+            }
+        )
+    )
+
+    with patch("tushare.pro_api", return_value=fake_pro):
+        ticker = await fetch_a_share_ticker(token="token", symbol="600519.SH")
+
+    assert ticker["price"] == 1444.05
+    assert ticker["quote_time"] == "2026-11-09T07:00:00Z"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_fetch_a_share_ticker_reads_an_index_from_index_daily():
+    fake_pro = _pro(_daily_frame(ts_code="000001.SH", close=3634.353), name="上证指数")
+
+    with patch("tushare.pro_api", return_value=fake_pro):
+        ticker = await fetch_a_share_ticker(token="token", symbol="000001.SH")
+
+    fake_pro.daily.assert_not_called()
+    assert fake_pro.index_daily.call_args.kwargs["ts_code"] == "000001.SH"
+    assert ticker["name"] == "上证指数"
+    assert ticker["price"] == 3634.353
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_fetch_a_share_ticker_reports_an_empty_snapshot():
-    with patch("tushare.realtime_quote", return_value=pd.DataFrame()):
+    with patch("tushare.pro_api", return_value=_pro(pd.DataFrame())):
         with pytest.raises(AppError) as raised:
-            await fetch_a_share_ticker(token="token", symbol="000300.SH")
+            await fetch_a_share_ticker(token="token", symbol="600519.SZ")
 
     assert raised.value.code == "symbol_not_found"
 
@@ -108,7 +163,7 @@ async def test_fetch_a_share_ticker_reports_an_empty_snapshot():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_fetch_a_share_ticker_reports_a_missing_symbol():
-    with patch("tushare.realtime_quote", return_value=None):
+    with patch("tushare.pro_api", return_value=_pro(pd.DataFrame())):
         with pytest.raises(AppError) as raised:
             await fetch_a_share_ticker(token="token", symbol="000300.SZ")
 
@@ -118,21 +173,7 @@ async def test_fetch_a_share_ticker_reports_a_missing_symbol():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_fetch_a_share_ticker_reports_a_symbol_without_a_usable_price():
-    fake_frame = pd.DataFrame(
-        {
-            "TS_CODE": ["430047.BJ"],
-            "NAME": ["诺思兰德"],
-            "OPEN": [0.0],
-            "PRE_CLOSE": [0.0],
-            "PRICE": [0.0],
-            "HIGH": [0.0],
-            "LOW": [0.0],
-            "DATE": ["20261109"],
-            "TIME": ["15:00:00"],
-        }
-    )
-
-    with patch("tushare.realtime_quote", return_value=fake_frame):
+    with patch("tushare.pro_api", return_value=_pro(_daily_frame(ts_code="430047.BJ", close=0.0))):
         with pytest.raises(AppError) as raised:
             await fetch_a_share_ticker(token="token", symbol="430047.BJ")
 
@@ -141,12 +182,25 @@ async def test_fetch_a_share_ticker_reports_a_symbol_without_a_usable_price():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_fetch_a_share_ticker_reports_a_missing_fund_permission():
+    fake_pro = _pro(pd.DataFrame())
+    fake_pro.fund_daily.side_effect = Exception("抱歉，您没有接口(fund_daily)访问权限")
+
+    with patch("tushare.pro_api", return_value=fake_pro):
+        with pytest.raises(AppError) as raised:
+            await fetch_a_share_ticker(token="token", symbol="515070.SH")
+
+    assert raised.value.code == "provider_unauthorized"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_fetch_a_share_ticker_result_maps_a_timeout():
-    with patch(
-        "tushare.realtime_quote",
-        side_effect=requests.exceptions.Timeout("slow"),
-    ):
-        result = await fetch_a_share_ticker_result(token="token", symbol="510300.SH")
+    fake_pro = _pro(pd.DataFrame())
+    fake_pro.daily.side_effect = requests.exceptions.Timeout("slow")
+
+    with patch("tushare.pro_api", return_value=fake_pro):
+        result = await fetch_a_share_ticker_result(token="token", symbol="600519.SH")
 
     assert result.success is False
     assert result.error is not None

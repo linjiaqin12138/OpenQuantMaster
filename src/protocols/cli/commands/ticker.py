@@ -64,9 +64,10 @@ JSON output contains only the service data and can be piped to a file.
 def ticker(ctx: click.Context, symbol: str, market: str, output: str) -> None:
     """Fetch the latest ticker snapshot of one instrument.
 
-    A-shares are read through Tushare and crypto symbols through the configured
-    CCXT venue. The response keeps the provider quote time separate from the
-    local fetch time. This is a point-in-time snapshot, not a stream.
+    A-shares are read from Tushare Pro daily bars (``daily``, ``index_daily``,
+    or ``fund_daily``). ``quote_time`` is that session's 15:00 Asia/Shanghai
+    close. Crypto symbols use the configured CCXT venue. The response keeps
+    the provider quote time separate from the local fetch time.
     """
     try:
         config = load_config(ctx.obj["config_path"])
