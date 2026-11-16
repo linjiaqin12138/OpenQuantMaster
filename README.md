@@ -4,7 +4,23 @@ Service-oriented quant building blocks under `src/services/` (`OHLCV`, `Ticker`,
 
 The code follows a layered architecture: `src/protocols/` (CLI) → `src/services/` (facade) → `src/use_cases/` (workflow) → `src/providers/` (third-party calls), with shared types in `src/models/`, generic helpers in `src/utils/`, the external configuration format in `src/config.py`, and the composition boundary in `src/composition.py`.
 
-Layering and test style: [`docs/conventions/`](docs/conventions/). Service references: [`docs/services/`](docs/services/).
+Layering and test style: [`docs/conventions/`](docs/conventions/). Service references: [`docs/services/`](docs/services/). Agent collaboration: [`AGENTS.md`](AGENTS.md).
+
+## Documentation entry
+
+| Doc | Purpose |
+|---|---|
+| [docs/conventions/](docs/conventions/) | Engineering norms (architecture, testing, English-only docs) |
+| [docs/services/](docs/services/) | Per-service contracts and call examples |
+| [AGENTS.md](AGENTS.md) | Agent sizing, gates, commands, and DoD |
+| [CHANGELOG.md](CHANGELOG.md) | User-visible behavior log (when present) |
+
+Project collaboration skills (auto-discovered by Cursor):
+
+- [product-delivery](.cursor/skills/product-delivery/SKILL.md) — intent, S/M/L, gates, live vs frozen docs
+- [layered-codebase](.cursor/skills/layered-codebase/SKILL.md) — layering, tests, coding DoD
+
+Domain/product skills under `skills/` (e.g. portfolio advisor) stay separate from these engineering skills.
 
 ## Requirements
 
