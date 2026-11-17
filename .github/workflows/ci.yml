@@ -47,11 +47,16 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install Ruff
-        run: python -m pip install ruff
+      - name: Install Ruff and import-linter
+        run: |
+          python -m pip install ruff import-linter
+          python -m pip install -e . --no-deps
 
       - name: Run Ruff
         run: ruff check .
+
+      - name: Run import contracts
+        run: lint-imports
 
   pkg:
     needs: lint

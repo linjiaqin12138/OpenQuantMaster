@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
-
-import math
 
 from src.models.result import AppError, Error, as_call_result
 

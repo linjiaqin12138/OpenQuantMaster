@@ -34,3 +34,9 @@ dist/
 .coverage
 .coverage.*
 htmlcov/
+
+# Graphify code graph (local query artifact, not a check)
+graphify-out/
+
+# import-linter cache
+.import_linter_cache/

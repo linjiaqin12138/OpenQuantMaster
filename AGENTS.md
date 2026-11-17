@@ -21,7 +21,7 @@
 
 确认可写码之后，遵循项目 skill [`.cursor/skills/layered-codebase`](.cursor/skills/layered-codebase/SKILL.md)。需要完整规则时阅读其 `references/architecture.md`、`complexity-ladder.md`、`testing.md`、`agent-rules.md`；本仓库细则见 [`docs/conventions/`](docs/conventions/)。
 
-依赖方向：`Protocol → Service → UseCase → Provider / Repository`，只向内。Engine（可独立发布、无领域知识）放 `src/engines/<name>/`，不进 `utils/`。
+依赖方向：`Protocol → Service → UseCase → Provider / Repository`，只向内。Engine（可独立发布、无领域知识）放 `src/engines/<name>/`，不进 `utils/`。查询代码图用 `graphify query`（先 `graphify extract . --code-only`，不对文档跑模型）；跨层 import 由 `lint-imports` 失败，Graphify 不是门禁。
 
 当前目标复杂度：**Level 3（含 Provider；已有 UseCase）**。升级触发条件见 [`docs/conventions/architecture.md`](docs/conventions/architecture.md) 与 layered-codebase 的 complexity ladder。出现真实持久化再引入 Repository；同一能力第二种实现再引入 Port。
 
@@ -48,6 +48,7 @@ pip install -e ".[dev]"
 
 ```bash
 ruff check .
+lint-imports
 mypy src
 pytest
 pytest tests/services -q
@@ -66,7 +67,7 @@ qm-cli run ohlcv --symbol BTCUSDT --market crypto --interval 1h --limit 10
    - 服务对外形状变化：更新对应 `docs/services/<service>.md`。
    - 按需更新 `docs/product/`、`docs/architecture/`、`docs/contracts/current/` 与 ADR；长期模块关系变化必须进入 architecture / conventions。
    - 命令、文档入口或协作边界变化：同步 README 与本文件。
-2. **验证与验收**：实际运行 `ruff check .`、`mypy src`（若已接入）、`pytest`；按变更档位完成行为测试，不能用类型检查代替行为验证。
+2. **验证与验收**：实际运行 `ruff check .`、`lint-imports`、`mypy src`（若已接入）、`pytest`；按变更档位完成行为测试，不能用类型检查代替行为验证。
 3. **行为流水与变更寿命**：用户可见行为或对外契约变化更新 `CHANGELOG.md`，纯内部 refactor 可省略；M/L 完成验收后更新 brief 状态并 Frozen，不回写其它 Frozen 变更包正文。
 4. **交付说明**：列出实际验证命令与结果、更新过的活文档及未做项；未明确获授权时不提交或推送。
 
